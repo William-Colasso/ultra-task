@@ -215,7 +215,7 @@ impl Block {
         }
     }
 
-    /// One fresh instance of every block type, for the "+ bloco" menu.
+    /// One fresh instance of every block type, for the block palette.
     pub fn templates() -> Vec<Block> {
         let s = |v: &str| v.to_string();
         vec![

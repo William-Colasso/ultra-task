@@ -19,7 +19,8 @@ O resultado é um único `target/release/ultratask.exe`. Os scripts ficam em `sc
 2. **⏺ Gravar** (ou `Ctrl+Shift+Alt+R`): use a janela-alvo normalmente e aperte o atalho de novo para parar.
 3. **▶ Tocar** (ou `Ctrl+Shift+Alt+P`). Para tudo, use `Ctrl+Shift+Alt+X`.
 4. Na aba **Blocos**:
-   - edite, reordene ou adicione passos;
+   - arraste blocos da paleta à esquerda para a árvore (ou clique num deles para pôr no fim);
+   - arraste um cartão pela alça ☰ para reordenar ou pôr dentro de Se/Repetir/Enquanto; o botão direito no cartão oferece "Envolver em…", e ⏷/⏵ recolhe um container;
    - use **Explodir em passos** para transformar uma gravação em blocos editáveis;
    - use 📍 para capturar coordenadas, cor ou região clicando na janela.
 

@@ -2,11 +2,13 @@
 
 mod catalog;
 mod cola;
+mod editor;
 mod hooks;
 mod humanmouse;
 mod manual;
 mod model;
 mod runner;
+mod tree;
 mod ui;
 mod win;
 
