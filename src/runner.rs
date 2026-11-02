@@ -3,7 +3,7 @@
 use crate::hooks;
 use crate::model::*;
 use crate::win::{self, Injector, WinInfo};
-use evalexpr::{ContextWithMutableFunctions, ContextWithMutableVariables, EvalexprResult, Function, HashMapContext, Value};
+use evalexpr::{ContextWithMutableFunctions, ContextWithMutableVariables, EvalexprResult, Function, HashMapContext, IterateVariablesContext, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -41,6 +41,15 @@ pub trait Io {
     fn sleep(&mut self, ms: u64);
 }
 
+/// Live view of a run for the debug panel; shared between the run thread and the UI.
+#[derive(Default)]
+pub struct Debug {
+    pub vars: Mutex<Vec<(String, String)>>,
+    pub current: Mutex<String>,
+    /// Set by a Breakpoint block or the UI's pause button; the run waits between blocks.
+    pub paused: AtomicBool,
+}
+
 pub struct Interp<'a> {
     io: &'a mut dyn Io,
     vars: HashMapContext,
@@ -48,6 +57,8 @@ pub struct Interp<'a> {
     scripts: &'a [Script],
     speed: f32,
     log: &'a mut dyn FnMut(String),
+    dbg: &'a Debug,
+    pub trace: bool,
     depth: u32,
     last_warn: String,
 }
@@ -57,7 +68,7 @@ fn jit(v: i64, j: u32) -> i64 {
 }
 
 impl<'a> Interp<'a> {
-    pub fn new(io: &'a mut dyn Io, stop: &'a AtomicBool, scripts: &'a [Script], speed: f32, log: &'a mut dyn FnMut(String)) -> Self {
+    pub fn new(io: &'a mut dyn Io, stop: &'a AtomicBool, scripts: &'a [Script], speed: f32, log: &'a mut dyn FnMut(String), dbg: &'a Debug) -> Self {
         let mut vars = HashMapContext::new();
         let _ = vars.set_function(
             "rand".into(),
@@ -74,7 +85,45 @@ impl<'a> Interp<'a> {
                 Ok(Value::Boolean(t[0].as_string()?.to_lowercase().contains(&t[1].as_string()?.to_lowercase())))
             }),
         );
-        Interp { io, vars, stop, scripts, speed, log, depth: 0, last_warn: String::new() }
+        Interp { io, vars, stop, scripts, speed, log, dbg, trace: false, depth: 0, last_warn: String::new() }
+    }
+
+    fn snapshot_vars(&self) {
+        let mut v: Vec<(String, String)> = self
+            .vars
+            .iter_variables()
+            .map(|(k, v)| {
+                let shown = match v {
+                    Value::String(s) => format!("\"{s}\""),
+                    v => v.to_string(),
+                };
+                (k, shown)
+            })
+            .collect();
+        v.sort();
+        *self.dbg.vars.lock().unwrap() = v;
+    }
+
+    /// Blocks while the run is paused (breakpoint / pause button); returns the time spent.
+    fn wait_if_paused(&mut self) -> R<u64> {
+        if !self.dbg.paused.load(Ordering::Relaxed) {
+            return Ok(0);
+        }
+        let t0 = self.io.now_ms();
+        while self.dbg.paused.load(Ordering::Relaxed) {
+            self.check()?;
+            self.io.sleep(50);
+        }
+        Ok(self.io.now_ms() - t0)
+    }
+
+    fn interp_text(&mut self, text: &str) -> R<String> {
+        Ok(interpolate(text, |e| {
+            self.text(e).map_err(|h| match h {
+                Halt::Error(s) => s,
+                Halt::Stopped => String::new(),
+            })
+        })?)
     }
 
     fn warn(&mut self, m: String) {
@@ -127,6 +176,12 @@ impl<'a> Interp<'a> {
     pub fn run_blocks(&mut self, blocks: &[Block]) -> R {
         for b in blocks {
             self.check()?;
+            self.wait_if_paused()?;
+            let summary = b.summary();
+            if self.trace {
+                (self.log)(format!("» {summary}"));
+            }
+            *self.dbg.current.lock().unwrap() = summary;
             self.run_block(b)?;
         }
         Ok(())
@@ -140,8 +195,9 @@ impl<'a> Interp<'a> {
         match b {
             Block::Recording { events, speed } => {
                 let k = (speed * self.speed).max(0.01) as f64;
-                let base = self.io.now_ms();
+                let mut base = self.io.now_ms();
                 for e in events {
+                    base += self.wait_if_paused()?; // a pause shifts the rest of the timeline
                     self.sleep_until(base + (e.t as f64 / k) as u64)?;
                     self.io.send(&e.ev)?;
                 }
@@ -180,12 +236,7 @@ impl<'a> Interp<'a> {
                 }
             }
             Block::Type { text } => {
-                let s = interpolate(text, |e| {
-                    self.text(e).map_err(|h| match h {
-                        Halt::Error(s) => s,
-                        Halt::Stopped => String::new(),
-                    })
-                })?;
+                let s = self.interp_text(text)?;
                 self.io.type_text(&s)?;
             }
             Block::Scroll { x, y, delta } => {
@@ -237,10 +288,22 @@ impl<'a> Interp<'a> {
             Block::SetVar { name, expr } => {
                 let v = self.eval(expr)?;
                 self.set_var(name, v)?;
+                self.snapshot_vars();
             }
             Block::OcrToVar { name, region } => {
                 let t = self.io.ocr(*region)?;
                 self.set_var(name, Value::String(t.trim().into()))?;
+                self.snapshot_vars();
+            }
+            Block::Log { text } => {
+                let s = self.interp_text(text)?;
+                (self.log)(format!("🐞 {s}"));
+            }
+            Block::Breakpoint => {
+                self.snapshot_vars();
+                (self.log)("⏸ breakpoint: veja as variáveis e clique ▶ na execução para continuar".into());
+                self.dbg.paused.store(true, Ordering::SeqCst);
+                self.wait_if_paused()?;
             }
             Block::Call { script } => {
                 if self.depth >= 32 {
@@ -395,6 +458,7 @@ pub struct RunHandle {
     pub stop: Arc<AtomicBool>,
     pub status: Arc<Mutex<String>>,
     pub done: Arc<AtomicBool>,
+    pub dbg: Arc<Debug>,
 }
 
 struct WinIo {
@@ -480,11 +544,20 @@ impl Io for WinIo {
     }
 }
 
-pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Settings, log: Sender<String>, wake: Arc<dyn Fn() + Send + Sync>) -> RunHandle {
+/// `delay_ms`: wait before starting (trigger delay), still stoppable.
+pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Settings, delay_ms: u64, log: Sender<String>, wake: Arc<dyn Fn() + Send + Sync>) -> RunHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new("Iniciando".to_string()));
     let done = Arc::new(AtomicBool::new(false));
-    let h = RunHandle { script: script.name.clone(), window: target.title.clone(), stop: stop.clone(), status: status.clone(), done: done.clone() };
+    let dbg = Arc::new(Debug::default());
+    let h = RunHandle {
+        script: script.name.clone(),
+        window: target.title.clone(),
+        stop: stop.clone(),
+        status: status.clone(),
+        done: done.clone(),
+        dbg: dbg.clone(),
+    };
     let (idle_ms, ocr_scale) = ((settings.idle_resume_s * 1000.0) as u64, settings.ocr_scale);
     std::thread::spawn(move || {
         let say = |m: String| {
@@ -495,6 +568,13 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
             *status.lock().unwrap() = m.into();
             wake();
         };
+        if delay_ms > 0 {
+            set(&format!("Aguardando {:.1} s (gatilho)", delay_ms as f32 / 1000.0));
+            let t0 = Instant::now();
+            while t0.elapsed() < Duration::from_millis(delay_ms) && !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
         let focus = script.mode == Mode::Focus;
         let _turn = focus.then(|| {
             set("Na fila (modo Foco roda um por vez)");
@@ -523,7 +603,8 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
             io.inj.prepare();
             let mut log_fn = |m: String| say(m);
             let r = {
-                let mut it = Interp::new(&mut io, &stop, &all, script.speed, &mut log_fn);
+                let mut it = Interp::new(&mut io, &stop, &all, script.speed, &mut log_fn, &dbg);
+                it.trace = script.trace;
                 let mut n = 0u32;
                 loop {
                     n += 1;
@@ -604,7 +685,8 @@ mod tests {
         let mut scripts = others;
         scripts.push(Script { name: "main".into(), blocks: blocks.clone(), ..Default::default() });
         let mut logs = |_m: String| {};
-        let r = Interp::new(&mut io, &stop, &scripts, 1.0, &mut logs).run_blocks(&blocks);
+        let dbg = Debug::default();
+        let r = Interp::new(&mut io, &stop, &scripts, 1.0, &mut logs, &dbg).run_blocks(&blocks);
         (io, r)
     }
 
@@ -685,6 +767,42 @@ mod tests {
         let (io, _) = run_with(vec![Block::Click { x: "1+1".into(), y: "3".into(), button: Btn::Left, kind: ClickKind::Double, jitter_px: 0 }], vec![]);
         let downs = io.sent.iter().filter(|s| matches!(s.1, Ev::Button(Btn::Left, true, 2, 3))).count();
         assert_eq!(downs, 2);
+    }
+
+    #[test]
+    fn debug_log_trace_vars_and_breakpoint() {
+        let mut io = FakeIo::default();
+        let stop = AtomicBool::new(false);
+        let dbg = Arc::new(Debug::default());
+        let mut logs = vec![];
+        let blocks = vec![set("a", "2"), set("nome", "\"Ana\""), Block::Log { text: "a={a * 10} {nome}".into() }, Block::Breakpoint, ty("depois")];
+        // The UI's ▶ button: unpause shortly after the breakpoint hits.
+        let d2 = dbg.clone();
+        let unpause = std::thread::spawn(move || {
+            while !d2.paused.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            std::thread::sleep(Duration::from_millis(30));
+            d2.paused.store(false, Ordering::SeqCst);
+        });
+        {
+            let mut log = |m: String| logs.push(m);
+            let mut it = Interp::new(&mut io, &stop, &[], 1.0, &mut log, &dbg);
+            it.trace = true;
+            assert_eq!(it.run_blocks(&blocks), Ok(()));
+        }
+        unpause.join().unwrap();
+        assert!(logs.contains(&"🐞 a=20 Ana".to_string()), "{logs:?}");
+        assert!(logs.iter().any(|l| l == "» a = 2"));
+        assert_eq!(*dbg.vars.lock().unwrap(), [("a".to_string(), "2".to_string()), ("nome".to_string(), "\"Ana\"".to_string())]);
+        assert_eq!(*dbg.current.lock().unwrap(), "Digitar \"depois\"");
+        assert_eq!(io.typed, ["depois"]);
+
+        // Stop wins over a pause.
+        dbg.paused.store(true, Ordering::SeqCst);
+        stop.store(true, Ordering::SeqCst);
+        let mut log = |_m: String| {};
+        assert_eq!(Interp::new(&mut io, &stop, &[], 1.0, &mut log, &dbg).run_blocks(&[ty("x")]), Err(Halt::Stopped));
     }
 
     #[test]

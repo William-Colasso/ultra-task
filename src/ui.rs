@@ -4,10 +4,11 @@ use crate::runner::{self, RunHandle};
 use crate::win::{self, Hwnd, WinInfo};
 use crate::{TrayMsg, make_tray};
 use eframe::egui::{self, Color32, ComboBox, DragValue, Id, RichText, Ui, ViewportCommand};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
@@ -59,23 +60,56 @@ pub struct App {
     tray_rx: Receiver<TrayMsg>,
     _tray: Option<tray_icon::TrayIcon>,
     quitting: bool,
+    last_poll: Instant,
+    /// OnStartup scripts already fired this session.
+    startup_done: HashSet<String>,
+    /// OnWindowOpen: windows already seen, per "script|exe|title" so editing the rule re-seeds.
+    seen: HashMap<String, HashSet<Hwnd>>,
+    /// `--tray`: eframe always shows the window after its first frame, so re-hide for a few frames.
+    hide_frames: u8,
+}
+
+fn theme_pref(t: Theme) -> egui::ThemePreference {
+    match t {
+        Theme::System => egui::ThemePreference::System,
+        Theme::Light => egui::ThemePreference::Light,
+        Theme::Dark => egui::ThemePreference::Dark,
+    }
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    /// `show_event`: named event another UltraTask instance signals to bring us up.
+    pub fn new(cc: &eframe::CreationContext<'_>, show_event: Option<isize>, start_hidden: bool) -> Self {
         let ctx = cc.egui_ctx.clone();
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || ctx.request_repaint());
         let w2 = wake.clone();
         let (hooks, hook_rx) = Hooks::start(move || w2());
         let (log_tx, log_rx) = channel();
         let (tray_tx, tray_rx) = channel();
-        let tray = make_tray(tray_tx, wake.clone());
+        let tray = make_tray(tray_tx.clone(), wake.clone());
+        // Heartbeat: wakes `logic` every 2 s even while hidden in the tray (trigger polling),
+        // and shows the window when a second instance is launched.
+        let w3 = wake.clone();
+        std::thread::spawn(move || {
+            loop {
+                match show_event {
+                    Some(ev) if win::wait_show(ev, 2000) => {
+                        let _ = tray_tx.send(TrayMsg::Show);
+                    }
+                    Some(_) => {}
+                    None => std::thread::sleep(Duration::from_secs(2)),
+                }
+                w3();
+            }
+        });
+        let settings = model::load_settings();
+        cc.egui_ctx.set_theme(theme_pref(settings.theme));
         let (scripts, errs) = model::load_scripts();
         let mut app = App {
             sel: (!scripts.is_empty()).then_some(0),
             scripts,
             dirty: false,
-            settings: model::load_settings(),
+            settings,
             hooks,
             hook_rx,
             log_tx,
@@ -96,12 +130,78 @@ impl App {
             tray_rx,
             _tray: tray,
             quitting: false,
+            last_poll: Instant::now(),
+            startup_done: HashSet::new(),
+            seen: HashMap::new(),
+            hide_frames: if start_hidden { 3 } else { 0 },
         };
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
         }
+        if app.settings.start_with_windows {
+            // Re-write so the entry follows the exe if it was moved.
+            if let Err(e) = win::set_autostart(true) {
+                app.say(e);
+            }
+        }
         app.register_hotkeys();
         app
+    }
+
+    fn reload(&mut self) {
+        self.save_dirty();
+        let name = self.sel.map(|i| self.scripts[i].name.clone());
+        let (scripts, errs) = model::load_scripts();
+        self.scripts = scripts;
+        self.sel = name.and_then(|n| self.scripts.iter().position(|s| s.name == n));
+        for e in errs {
+            self.say(format!("Erro ao ler script {e}"));
+        }
+        self.say(format!("Recarregado: {} scripts", self.scripts.len()));
+        self.register_hotkeys();
+    }
+
+    /// Fires OnStartup / OnWindowOpen triggers. Runs every ~2 s (heartbeat), also while hidden.
+    fn poll_triggers(&mut self) {
+        if self.last_poll.elapsed() < Duration::from_millis(1500) {
+            return;
+        }
+        self.last_poll = Instant::now();
+        if self.scripts.iter().all(|s| s.trigger == Trigger::Manual) {
+            return;
+        }
+        let wins = win::list_windows();
+        let mut fire = vec![];
+        for (i, s) in self.scripts.iter().enumerate() {
+            let Some(rule) = &s.target else { continue };
+            let matches: Vec<&WinInfo> = wins.iter().filter(|w| rule.matches(&w.exe, &w.title)).collect();
+            match s.trigger {
+                Trigger::Manual => {}
+                Trigger::OnStartup { delay_s } => {
+                    if let Some(w) = matches.first()
+                        && self.startup_done.insert(s.name.clone())
+                    {
+                        fire.push((i, (*w).clone(), delay_s));
+                    }
+                }
+                Trigger::OnWindowOpen { delay_s } => {
+                    let key = format!("{}|{}|{}", s.name, rule.exe, rule.title);
+                    let now: HashSet<Hwnd> = matches.iter().map(|w| w.hwnd).collect();
+                    // First sight seeds the set: windows already open don't count as "opened".
+                    let seen = self.seen.entry(key).or_insert_with(|| now.clone());
+                    for w in &matches {
+                        if !seen.contains(&w.hwnd) {
+                            fire.push((i, (*w).clone(), delay_s));
+                        }
+                    }
+                    *seen = now;
+                }
+            }
+        }
+        for (i, w, delay_s) in fire {
+            self.say(format!("Gatilho: '{}' em '{}'", self.scripts[i].name, w.title));
+            self.play_on(i, w, (delay_s.max(0.0) * 1000.0) as u64);
+        }
     }
 
     fn say(&mut self, m: impl Into<String>) {
@@ -227,22 +327,38 @@ impl App {
             return;
         }
         match purpose {
-            Purpose::Play => {
-                self.save_dirty();
-                let s = self.scripts[i].clone();
-                if s.blocks.is_empty() {
-                    self.say(format!("'{}' não tem blocos", s.name));
-                    return;
-                }
-                let h = runner::spawn(s, self.scripts.clone(), w, &self.settings, self.log_tx.clone(), self.wake.clone());
-                self.runs.push(h);
-            }
+            Purpose::Play => self.play_on(i, w, 0),
             Purpose::Record => {
                 ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
                 win::bring_to_front(w.hwnd);
                 self.hooks.send(Cmd::Record(Some(w.hwnd)));
                 self.recording = Some((i, w.hwnd));
                 self.say(format!("Gravando em '{}'… {} para parar", w.title, self.settings.record.label()));
+            }
+        }
+    }
+
+    fn play_on(&mut self, i: usize, w: WinInfo, delay_ms: u64) {
+        if !win::self_elevated() && win::is_elevated_pid(w.pid) {
+            self.elevated_target = true;
+            self.say(format!("'{}' roda como administrador: o Windows bloqueia input vindo do UltraTask", w.title));
+            return;
+        }
+        self.save_dirty();
+        let s = self.scripts[i].clone();
+        if s.blocks.is_empty() {
+            self.say(format!("'{}' não tem blocos", s.name));
+            return;
+        }
+        let h = runner::spawn(s, self.scripts.clone(), w, &self.settings, delay_ms, self.log_tx.clone(), self.wake.clone());
+        self.runs.push(h);
+        // Keep finished runs around for inspecting their variables, but not forever.
+        while self.runs.len() > 30 {
+            match self.runs.iter().position(|r| r.done.load(Ordering::Relaxed)) {
+                Some(k) => {
+                    self.runs.remove(k);
+                }
+                None => break,
             }
         }
     }
@@ -390,8 +506,16 @@ impl App {
                 if ui.button("⚙ Ajustes").clicked() {
                     self.show_settings = !self.show_settings;
                 }
+                let dark = ui.ctx().theme() == egui::Theme::Dark;
+                if ui.button(if dark { "☀" } else { "🌙" }).on_hover_text("Alternar tema claro/escuro").clicked() {
+                    self.settings.theme = if dark { Theme::Light } else { Theme::Dark };
+                    ui.ctx().set_theme(theme_pref(self.settings.theme));
+                    if let Err(e) = model::save_settings(&self.settings) {
+                        self.say(format!("Erro ao salvar ajustes: {e}"));
+                    }
+                }
                 if rec {
-                    ui.colored_label(Color32::from_rgb(230, 60, 60), "● Gravando…");
+                    ui.colored_label(Color32::from_rgb(230, 60, 60), "⏺ Gravando…");
                 }
                 if self.pick.is_some() {
                     ui.colored_label(Color32::from_rgb(230, 160, 30), "🎯 Aguardando clique…");
@@ -415,6 +539,9 @@ impl App {
     fn library(&mut self, ui: &mut Ui) {
         ui.heading("Scripts");
         ui.horizontal_wrapped(|ui| {
+            if ui.button("🔄").on_hover_text("Recarregar scripts da pasta (ex.: criados por um agente de IA)").clicked() {
+                self.reload();
+            }
             if ui.button("➕ Novo").clicked() {
                 let name = self.unique_name("Novo script");
                 self.add_script(Script { name, ..Default::default() });
@@ -485,17 +612,57 @@ impl App {
     }
 
     fn bottom(&mut self, ui: &mut Ui) {
-        ui.strong("Execuções");
+        ui.horizontal(|ui| {
+            ui.strong("Execuções");
+            if self.runs.iter().any(|r| r.done.load(Ordering::Relaxed)) && ui.small_button("Limpar terminadas").clicked() {
+                self.runs.retain(|r| !r.done.load(Ordering::Relaxed));
+            }
+        });
         if self.runs.is_empty() {
             ui.weak("nenhuma");
         }
-        for r in &self.runs {
-            ui.horizontal(|ui| {
-                if ui.small_button("⏹").on_hover_text("Parar").clicked() {
-                    r.stop.store(true, Ordering::SeqCst);
+        let mut dismiss = None;
+        egui::ScrollArea::vertical().id_salt("runs").max_height(140.0).show(ui, |ui| {
+            for (k, r) in self.runs.iter().enumerate() {
+                let done = r.done.load(Ordering::Relaxed);
+                let paused = r.dbg.paused.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    if done {
+                        if ui.small_button("✖").on_hover_text("Remover da lista").clicked() {
+                            dismiss = Some(k);
+                        }
+                    } else {
+                        if ui.small_button(if paused { "▶" } else { "⏸" }).on_hover_text(if paused { "Continuar" } else { "Pausar (debug)" }).clicked() {
+                            r.dbg.paused.store(!paused, Ordering::SeqCst);
+                        }
+                        if ui.small_button("⏹").on_hover_text("Parar").clicked() {
+                            r.stop.store(true, Ordering::SeqCst);
+                        }
+                    }
+                    let status = if paused && !done { "⏸ pausado".to_string() } else { r.status.lock().unwrap().clone() };
+                    ui.label(format!("{}  em  \"{}\"  —  {status}", r.script, r.window));
+                    if !done {
+                        ui.weak(format!("· {}", r.dbg.current.lock().unwrap()));
+                    }
+                });
+                let vars = r.dbg.vars.lock().unwrap();
+                if !vars.is_empty() {
+                    ui.indent(k, |ui| {
+                        egui::CollapsingHeader::new(format!("variáveis ({})", vars.len())).id_salt(("vars", k)).default_open(paused).show(ui, |ui| {
+                            egui::Grid::new(("vg", k)).striped(true).show(ui, |ui| {
+                                for (name, v) in vars.iter() {
+                                    ui.monospace(name);
+                                    ui.monospace(v);
+                                    ui.end_row();
+                                }
+                            });
+                        });
+                    });
                 }
-                ui.label(format!("{}  →  {}  —  {}", r.script, r.window, r.status.lock().unwrap()));
-            });
+            }
+        });
+        if let Some(k) = dismiss {
+            self.runs.remove(k);
         }
         ui.separator();
         egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
@@ -619,6 +786,38 @@ impl App {
             s.hotkey = (hk.vk != 0).then_some(hk);
             ui.end_row();
 
+            ui.label("Gatilho");
+            ui.vertical(|ui| {
+                let (mut kind, mut delay) = match s.trigger {
+                    Trigger::Manual => (0, 0.0),
+                    Trigger::OnStartup { delay_s } => (1, delay_s),
+                    Trigger::OnWindowOpen { delay_s } => (2, delay_s),
+                };
+                ui.radio_value(&mut kind, 0, "Manual (botão ▶ ou atalho)");
+                ui.radio_value(&mut kind, 1, "Ao iniciar o UltraTask (com \"Iniciar com o Windows\" = ao ligar o PC), assim que a janela-alvo existir");
+                ui.radio_value(&mut kind, 2, "Sempre que uma nova janela-alvo abrir (ex.: ao iniciar o app/jogo)");
+                if kind != 0 {
+                    ui.horizontal(|ui| {
+                        ui.label("Esperar");
+                        ui.add(DragValue::new(&mut delay).range(0.0..=3600.0).speed(0.5).suffix(" s"));
+                        ui.weak("antes de começar (tempo para o app carregar)");
+                    });
+                    if s.target.is_none() {
+                        ui.colored_label(Color32::from_rgb(230, 160, 30), "⚠ gatilhos precisam de uma janela-alvo");
+                    }
+                }
+                s.trigger = match kind {
+                    1 => Trigger::OnStartup { delay_s: delay },
+                    2 => Trigger::OnWindowOpen { delay_s: delay },
+                    _ => Trigger::Manual,
+                };
+            });
+            ui.end_row();
+
+            ui.label("Debug");
+            ui.checkbox(&mut s.trace, "Registrar cada bloco no log ao rodar");
+            ui.end_row();
+
             ui.label("Tamanho gravado");
             match s.client_size {
                 Some((w, h)) => {
@@ -686,11 +885,34 @@ impl App {
                     ui.label("OCR: ampliar a região");
                     ui.add(DragValue::new(&mut st.ocr_scale).range(1..=4).suffix("×"));
                     ui.end_row();
+                    ui.label("Tema");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut st.theme, Theme::System, "Sistema");
+                        ui.radio_value(&mut st.theme, Theme::Light, "Claro");
+                        ui.radio_value(&mut st.theme, Theme::Dark, "Escuro");
+                    });
+                    ui.end_row();
+                    ui.label("Segundo plano");
+                    ui.checkbox(&mut st.start_with_windows, "Iniciar com o Windows (escondido na bandeja)");
+                    ui.end_row();
                 });
+                ui.weak("Fechar a janela só esconde o UltraTask na bandeja; gatilhos e atalhos continuam ativos. Para sair: bandeja > Sair.");
                 ui.separator();
                 ui.weak(format!("Scripts ficam em {}", model::base_dir().join("scripts").display()));
             });
             self.show_settings = open;
+            if self.settings.theme != before.theme {
+                ctx.set_theme(theme_pref(self.settings.theme));
+            }
+            if self.settings.start_with_windows != before.start_with_windows {
+                match win::set_autostart(self.settings.start_with_windows) {
+                    Ok(()) => self.say(if self.settings.start_with_windows { "UltraTask vai iniciar com o Windows" } else { "UltraTask não inicia mais com o Windows" }),
+                    Err(e) => {
+                        self.say(e);
+                        self.settings.start_with_windows = before.start_with_windows;
+                    }
+                }
+            }
             if self.settings != before {
                 if let Err(e) = model::save_settings(&self.settings) {
                     self.say(format!("Erro ao salvar ajustes: {e}"));
@@ -703,6 +925,11 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.hide_frames > 0 {
+            self.hide_frames -= 1;
+            ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            ctx.request_repaint();
+        }
         while let Ok(o) = self.hook_rx.try_recv() {
             match o {
                 Out::Hotkey(hooks::RECORD_HOTKEY) => self.toggle_record(ctx),
@@ -730,13 +957,13 @@ impl eframe::App for App {
                 }
             }
         }
-        self.runs.retain(|r| !r.done.load(Ordering::Relaxed));
+        self.poll_triggers();
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self._tray.is_some() {
             self.save_dirty();
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
         }
-        if !self.runs.is_empty() || self.recording.is_some() {
+        if self.runs.iter().any(|r| !r.done.load(Ordering::Relaxed)) || self.recording.is_some() {
             ctx.request_repaint_after(Duration::from_millis(300));
         }
     }
@@ -874,7 +1101,7 @@ fn blocks_ui(ui: &mut Ui, blocks: &mut Vec<Block>, id: Id, ec: &mut EditCtx) {
 }
 
 fn expr_edit(ui: &mut Ui, s: &mut String, width: f32) {
-    let ok = evalexpr::build_operator_tree::<evalexpr::DefaultNumericTypes>(s).is_ok();
+    let ok = model::expr_error(s).is_none();
     let mut te = egui::TextEdit::singleline(s).desired_width(width);
     if !ok {
         te = te.text_color(Color32::from_rgb(230, 60, 60));
@@ -997,7 +1224,7 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
         }
         Block::OcrToVar { name, region } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
-            ui.label("← texto da região");
+            ui.label("= texto da região");
             region_ui(ui, region, id, ec);
         }
         Block::Call { script } => {
@@ -1006,6 +1233,12 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
                     ui.selectable_value(script, n.clone(), n);
                 }
             });
+        }
+        Block::Log { text } => {
+            ui.add(egui::TextEdit::singleline(text).desired_width(320.0).hint_text("ex.: contador = {contador}"));
+        }
+        Block::Breakpoint => {
+            ui.weak("pausa a execução aqui; veja as variáveis no painel e clique ▶ para continuar");
         }
         Block::Stop => {
             ui.weak("encerra o script aqui");
@@ -1050,5 +1283,34 @@ fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
         }
         CondKind::Expr(s) => expr_edit(ui, s, 240.0),
         CondKind::WindowExists | CondKind::WindowForeground => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every non-ASCII char inside a string literal must exist in egui's bundled fonts,
+    /// otherwise it renders as an empty box.
+    #[test]
+    fn ui_glyphs_exist() {
+        let ctx = egui::Context::default();
+        ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs")].concat();
+        let mut chars = std::collections::BTreeSet::new();
+        for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            let mut in_str = false;
+            let mut prev = ' ';
+            for c in line.chars() {
+                if c == '"' && prev != '\\' {
+                    in_str = !in_str;
+                } else if in_str && !c.is_ascii() {
+                    chars.insert(c);
+                }
+                prev = c;
+            }
+        }
+        let missing: String = ctx.fonts_mut(|f| chars.into_iter().filter(|&c| !f.has_glyph(&egui::FontId::proportional(14.0), c) || !f.has_glyph(&egui::FontId::monospace(14.0), c)).collect());
+        assert!(missing.is_empty(), "sem glifo: {missing:?}");
     }
 }

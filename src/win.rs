@@ -1,5 +1,5 @@
 //! Thin Win32 layer: window lookup, input injection (background + focus), capture and OCR.
-use crate::model::{Btn, Ev, Mode, Region, TargetRule, glob_match};
+use crate::model::{Btn, Ev, Mode, Region, TargetRule};
 use std::mem::size_of;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
@@ -84,10 +84,7 @@ pub fn list_windows() -> Vec<WinInfo> {
 }
 
 pub fn find_matches(rule: &TargetRule) -> Vec<WinInfo> {
-    list_windows()
-        .into_iter()
-        .filter(|w| w.exe.eq_ignore_ascii_case(&rule.exe) && glob_match(&rule.title, &w.title))
-        .collect()
+    list_windows().into_iter().filter(|w| rule.matches(&w.exe, &w.title)).collect()
 }
 
 pub fn is_alive(h: Hwnd) -> bool {
@@ -175,6 +172,50 @@ pub fn relaunch_as_admin() {
     if r.0 as isize > 32 {
         std::process::exit(0);
     }
+}
+
+/// Writes (Some) or deletes (None) a REG_SZ value under HKEY_CURRENT_USER.
+fn set_reg_string(subkey: PCWSTR, name: PCWSTR, value: Option<&str>) -> Result<(), String> {
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
+    let r = unsafe {
+        match value {
+            Some(v) => {
+                let wide: Vec<u16> = v.encode_utf16().chain([0]).collect();
+                RegSetKeyValueW(HKEY_CURRENT_USER, subkey, name, REG_SZ.0, Some(wide.as_ptr() as *const _), (wide.len() * 2) as u32)
+            }
+            None => match RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey, name) {
+                ERROR_FILE_NOT_FOUND => ERROR_SUCCESS,
+                r => r,
+            },
+        }
+    };
+    if r == ERROR_SUCCESS { Ok(()) } else { Err(format!("registro do Windows: erro {}", r.0)) }
+}
+
+/// "Iniciar com o Windows": HKCU Run entry that starts us hidden in the tray.
+pub fn set_autostart(on: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let cmd = format!("\"{}\" --tray", exe.display());
+    set_reg_string(w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run"), w!("UltraTask"), on.then_some(cmd.as_str()))
+}
+
+/// First instance: returns the named "show" event to wait on. A second instance signals that
+/// event (so the running one pops up) and gets None, meaning it should exit.
+pub fn single_instance() -> Option<isize> {
+    unsafe {
+        if let Ok(h) = OpenEventW(EVENT_MODIFY_STATE, false, w!("UltraTask.Show")) {
+            let _ = SetEvent(h);
+            let _ = CloseHandle(h);
+            return None;
+        }
+        CreateEventW(None, false, false, w!("UltraTask.Show")).ok().map(|h| h.0 as isize)
+    }
+}
+
+/// True if another instance asked us to show ourselves within `ms`.
+pub fn wait_show(ev: isize, ms: u32) -> bool {
+    unsafe { WaitForSingleObject(HANDLE(ev as *mut _), ms) == windows::Win32::Foundation::WAIT_OBJECT_0 }
 }
 
 fn send_inputs(inputs: &[INPUT]) {
@@ -601,6 +642,28 @@ mod tests {
         let img = capture_client(top, Mode::Background).unwrap();
         let txt = ocr(&img.scale(2)).unwrap();
         assert!(txt.to_uppercase().contains("ULTRATASK"), "OCR leu: {txt:?}");
+    }
+
+    /// Same code path as set_autostart, on a throwaway key that is removed afterwards.
+    #[test]
+    #[ignore = "escreve numa chave temporária do HKCU; rode com cargo test -- --ignored"]
+    fn registry_roundtrip() {
+        use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegDeleteKeyW, RegGetValueW};
+        let (key, name) = (w!("Software\\UltraTaskTest"), w!("v"));
+        let read = || unsafe {
+            let mut buf = [0u16; 64];
+            let mut len = (buf.len() * 2) as u32;
+            let r = RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len));
+            r.is_ok().then(|| String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)]))
+        };
+        set_reg_string(key, name, Some("\"C:\\x y\\u.exe\" --tray")).unwrap();
+        assert_eq!(read().as_deref(), Some("\"C:\\x y\\u.exe\" --tray"));
+        set_reg_string(key, name, None).unwrap();
+        assert_eq!(read(), None);
+        set_reg_string(key, name, None).unwrap(); // deleting twice is fine
+        unsafe {
+            let _ = RegDeleteKeyW(HKEY_CURRENT_USER, key);
+        }
     }
 
     #[test]

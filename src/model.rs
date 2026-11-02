@@ -10,12 +10,40 @@ pub enum Mode {
 
 /// Identifies the target window across restarts. `title` accepts `*` and `?`.
 #[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TargetRule {
     pub exe: String,
     pub title: String,
 }
 
+impl TargetRule {
+    pub fn matches(&self, exe: &str, title: &str) -> bool {
+        exe.eq_ignore_ascii_case(&self.exe) && glob_match(&self.title, title)
+    }
+}
+
+/// When a script starts by itself (besides the play button / hotkeys).
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub enum Trigger {
+    #[default]
+    Manual,
+    /// Once per UltraTask session, as soon as a matching window exists.
+    OnStartup { delay_s: f32 },
+    /// Every time a new matching window appears (windows already open when UltraTask starts don't count).
+    OnWindowOpen { delay_s: f32 },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Copy, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Hotkey {
     pub ctrl: bool,
     pub shift: bool,
@@ -86,6 +114,7 @@ pub enum OnTimeout {
 }
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Region {
     pub x: i32,
     pub y: i32,
@@ -94,6 +123,7 @@ pub struct Region {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum CondKind {
     Pixel { x: String, y: String, color: [u8; 3], tol: u8 },
     OcrContains { region: Region, text: String },
@@ -104,6 +134,7 @@ pub enum CondKind {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Condition {
     pub kind: CondKind,
     pub negate: bool,
@@ -117,6 +148,7 @@ impl Default for Condition {
 
 /// Numeric fields hold evalexpr expressions ("120", "x0 + 10").
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub enum Block {
     Recording { events: Vec<Event>, speed: f32 },
     Move { x: String, y: String },
@@ -132,6 +164,8 @@ pub enum Block {
     SetVar { name: String, expr: String },
     OcrToVar { name: String, region: Region },
     Call { script: String },
+    Log { text: String },
+    Breakpoint,
     Stop,
 }
 
@@ -152,7 +186,32 @@ impl Block {
             Block::SetVar { .. } => "Definir variável",
             Block::OcrToVar { .. } => "Ler texto (OCR)",
             Block::Call { .. } => "Chamar script",
+            Block::Log { .. } => "Mostrar no log",
+            Block::Breakpoint => "Breakpoint (pausar)",
             Block::Stop => "Parar",
+        }
+    }
+
+    /// One line describing what the block does, for the debug panel and trace log.
+    pub fn summary(&self) -> String {
+        match self {
+            Block::Recording { events, speed } => format!("Reproduzir gravação ({} eventos, {speed}×)", events.len()),
+            Block::Move { x, y } => format!("Mover para ({x}, {y})"),
+            Block::Click { x, y, button, kind, .. } => format!("Clique {kind:?} {button:?} em ({x}, {y})"),
+            Block::Key { vk, action } => format!("Tecla {} {action:?}", key_name(*vk)),
+            Block::Type { text } => format!("Digitar \"{text}\""),
+            Block::Scroll { x, y, delta } => format!("Rolar {delta} em ({x}, {y})"),
+            Block::Wait { ms, jitter_ms } => format!("Esperar {ms} ms ±{jitter_ms}"),
+            Block::WaitUntil { timeout_ms, .. } => format!("Esperar até condição (timeout {timeout_ms} ms)"),
+            Block::If { .. } => "Se …".into(),
+            Block::Repeat { times, .. } => format!("Repetir {times} vezes"),
+            Block::While { .. } => "Enquanto …".into(),
+            Block::SetVar { name, expr } => format!("{name} = {expr}"),
+            Block::OcrToVar { name, region } => format!("{name} = OCR ({}, {}, {}×{})", region.x, region.y, region.w, region.h),
+            Block::Call { script } => format!("Chamar '{script}'"),
+            Block::Log { text } => format!("Log \"{text}\""),
+            Block::Breakpoint => "Breakpoint".into(),
+            Block::Stop => "Parar".into(),
         }
     }
 
@@ -173,13 +232,15 @@ impl Block {
             Block::SetVar { name: s("contador"), expr: s("0") },
             Block::OcrToVar { name: s("texto"), region: Region { x: 0, y: 0, w: 200, h: 40 } },
             Block::Call { script: String::new() },
+            Block::Log { text: s("contador = {contador}") },
+            Block::Breakpoint,
             Block::Stop,
         ]
     }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Script {
     pub name: String,
     pub target: Option<TargetRule>,
@@ -189,6 +250,9 @@ pub struct Script {
     pub repeat: u32, // 0 = forever
     pub hotkey: Option<Hotkey>,
     pub client_size: Option<(i32, i32)>,
+    pub trigger: Trigger,
+    /// Debug: log every block as it runs.
+    pub trace: bool,
     pub blocks: Vec<Block>,
 }
 
@@ -203,6 +267,8 @@ impl Default for Script {
             repeat: 1,
             hotkey: None,
             client_size: None,
+            trigger: Trigger::Manual,
+            trace: false,
             blocks: vec![],
         }
     }
@@ -216,6 +282,8 @@ pub struct Settings {
     pub panic: Hotkey,
     pub idle_resume_s: f32,
     pub ocr_scale: u32,
+    pub theme: Theme,
+    pub start_with_windows: bool,
 }
 
 impl Default for Settings {
@@ -226,6 +294,8 @@ impl Default for Settings {
             panic: Hotkey::csa(b'X' as u16),
             idle_resume_s: 2.0,
             ocr_scale: 2,
+            theme: Theme::System,
+            start_with_windows: false,
         }
     }
 }
@@ -347,10 +417,175 @@ pub fn interpolate(text: &str, mut eval: impl FnMut(&str) -> Result<String, Stri
     Ok(out)
 }
 
+// ---------- validation (editor highlighting + `ultratask --validate`) ----------
+
+pub fn expr_error(s: &str) -> Option<String> {
+    // evalexpr only notices "x >" (missing operand) when evaluating, so check arity here.
+    fn arity_ok(n: &evalexpr::Node) -> bool {
+        use evalexpr::Operator::*;
+        let want = match n.operator() {
+            Add | Sub | Mul | Div | Mod | Exp | Eq | Neq | Gt | Lt | Geq | Leq | And | Or | Assign | AddAssign | SubAssign | MulAssign | DivAssign | ModAssign | ExpAssign | AndAssign | OrAssign => Some(2),
+            Not | Neg => Some(1),
+            _ => None,
+        };
+        want.is_none_or(|w| n.children().len() == w) && n.children().iter().all(arity_ok)
+    }
+    if s.trim().is_empty() {
+        return Some("vazia".into());
+    }
+    match evalexpr::build_operator_tree::<evalexpr::DefaultNumericTypes>(s) {
+        Err(e) => Some(e.to_string()),
+        Ok(n) if !arity_ok(&n) => Some("operador sem operando".into()),
+        Ok(_) => None,
+    }
+}
+
+fn is_ident(s: &str) -> bool {
+    let mut c = s.chars();
+    c.next().is_some_and(|f| f.is_alphabetic() || f == '_') && c.all(|ch| ch.is_alphanumeric() || ch == '_')
+}
+
+/// Problems that would make the script fail at run time, each prefixed with its JSON path.
+pub fn validate(s: &Script, known: &[String]) -> Vec<String> {
+    let mut errs = vec![];
+    if s.name.trim().is_empty() {
+        errs.push("name: vazio".into());
+    }
+    if !(s.speed > 0.0) {
+        errs.push(format!("speed: deve ser > 0 (é {})", s.speed));
+    }
+    if s.target.as_ref().is_some_and(|t| t.exe.trim().is_empty()) {
+        errs.push("target.exe: vazio".into());
+    }
+    if s.trigger != Trigger::Manual && s.target.is_none() {
+        errs.push("trigger: gatilhos precisam de um target".into());
+    }
+    validate_blocks(&s.blocks, "blocks", known, &mut errs);
+    errs
+}
+
+fn check_expr(errs: &mut Vec<String>, path: &str, s: &str) {
+    if let Some(e) = expr_error(s) {
+        errs.push(format!("{path}: expressão inválida \"{s}\": {e}"));
+    }
+}
+
+fn check_cond(errs: &mut Vec<String>, path: &str, c: &Condition) {
+    match &c.kind {
+        CondKind::Pixel { x, y, .. } => {
+            check_expr(errs, &format!("{path}.kind.Pixel.x"), x);
+            check_expr(errs, &format!("{path}.kind.Pixel.y"), y);
+        }
+        CondKind::OcrContains { region, .. } if region.w <= 0 || region.h <= 0 => errs.push(format!("{path}.kind.OcrContains.region: w e h devem ser > 0")),
+        CondKind::Expr(e) => check_expr(errs, &format!("{path}.kind.Expr"), e),
+        _ => {}
+    }
+}
+
+fn validate_blocks(blocks: &[Block], path: &str, known: &[String], errs: &mut Vec<String>) {
+    for (i, b) in blocks.iter().enumerate() {
+        let p = format!("{path}[{i}]");
+        let f = |field: &str| format!("{p}.{field}");
+        match b {
+            Block::Recording { speed, .. } if !(*speed > 0.0) => errs.push(format!("{}: deve ser > 0", f("speed"))),
+            Block::Move { x, y } | Block::Click { x, y, .. } | Block::Scroll { x, y, .. } => {
+                check_expr(errs, &f("x"), x);
+                check_expr(errs, &f("y"), y);
+            }
+            Block::Key { vk: 0, .. } => errs.push(format!("{}: 0 não é uma tecla", f("vk"))),
+            Block::Type { text } | Block::Log { text } => {
+                if let Err(e) = interpolate(text, |e| expr_error(e).map_or(Ok(String::new()), |m| Err(format!("{{{e}}}: {m}")))) {
+                    errs.push(format!("{}: {e}", f("text")));
+                }
+            }
+            Block::Wait { ms, .. } => check_expr(errs, &f("ms"), ms),
+            Block::WaitUntil { cond, timeout_ms, .. } => {
+                check_cond(errs, &f("cond"), cond);
+                check_expr(errs, &f("timeout_ms"), timeout_ms);
+            }
+            Block::If { cond, then, else_ } => {
+                check_cond(errs, &f("cond"), cond);
+                validate_blocks(then, &f("then"), known, errs);
+                validate_blocks(else_, &f("else_"), known, errs);
+            }
+            Block::Repeat { times, body } => {
+                check_expr(errs, &f("times"), times);
+                validate_blocks(body, &f("body"), known, errs);
+            }
+            Block::While { cond, body } => {
+                check_cond(errs, &f("cond"), cond);
+                validate_blocks(body, &f("body"), known, errs);
+            }
+            Block::SetVar { name, expr } => {
+                if !is_ident(name) {
+                    errs.push(format!("{}: \"{name}\" não é um nome de variável válido", f("name")));
+                }
+                check_expr(errs, &f("expr"), expr);
+            }
+            Block::OcrToVar { name, region } => {
+                if !is_ident(name) {
+                    errs.push(format!("{}: \"{name}\" não é um nome de variável válido", f("name")));
+                }
+                if region.w <= 0 || region.h <= 0 {
+                    errs.push(format!("{}: w e h devem ser > 0", f("region")));
+                }
+            }
+            Block::Call { script } if !known.contains(script) => errs.push(format!("{}: script \"{script}\" não encontrado na pasta", f("script"))),
+            _ => {}
+        }
+    }
+}
+
+/// `ultratask --validate a.json b.json`: prints OK/ERRO lines, returns the process exit code.
+pub fn validate_files(paths: &[String]) -> i32 {
+    if paths.is_empty() {
+        println!("uso: ultratask --validate <script.json>...");
+        return 2;
+    }
+    let mut failed = false;
+    for p in paths {
+        let path = std::path::Path::new(p);
+        let parsed = std::fs::read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|b| serde_json::from_slice::<Script>(&b).map_err(|e| format!("JSON inválido: {e}")));
+        let s = match parsed {
+            Ok(s) => s,
+            Err(e) => {
+                println!("ERRO {p}: {e}");
+                failed = true;
+                continue;
+            }
+        };
+        // "Chamar script" may point at any script in the same folder.
+        let mut known = vec![s.name.clone()];
+        if let Some(dir) = path.parent().and_then(|d| std::fs::read_dir(if d.as_os_str().is_empty() { std::path::Path::new(".") } else { d }).ok()) {
+            for e in dir.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "json")) {
+                if let Ok(o) = std::fs::read(e.path()).map_err(|_| ()).and_then(|b| serde_json::from_slice::<Script>(&b).map_err(|_| ())) {
+                    known.push(o.name);
+                }
+            }
+        }
+        let mut errs = validate(&s, &known);
+        let want = file_name(&s.name);
+        if path.file_name().and_then(|f| f.to_str()) != Some(want.as_str()) {
+            errs.push(format!("o arquivo deveria se chamar \"{want}\" (derivado de name)"));
+        }
+        if errs.is_empty() {
+            println!("OK {p}");
+        } else {
+            failed = true;
+            for e in errs {
+                println!("ERRO {p}: {e}");
+            }
+        }
+    }
+    i32::from(failed)
+}
+
 pub const KEYS: &[(u16, &str)] = &[
     (0x08, "Backspace"), (0x09, "Tab"), (0x0D, "Enter"), (0x10, "Shift"), (0x11, "Ctrl"), (0x12, "Alt"),
     (0x13, "Pause"), (0x14, "CapsLock"), (0x1B, "Esc"), (0x20, "Espaço"), (0x21, "PgUp"), (0x22, "PgDn"),
-    (0x23, "End"), (0x24, "Home"), (0x25, "←"), (0x26, "↑"), (0x27, "→"), (0x28, "↓"), (0x2C, "PrintScreen"),
+    (0x23, "End"), (0x24, "Home"), (0x25, "⬅"), (0x26, "⬆"), (0x27, "➡"), (0x28, "⬇"), (0x2C, "PrintScreen"),
     (0x2D, "Insert"), (0x2E, "Delete"), (0x5B, "Win"), (0x60, "Num0"), (0x61, "Num1"), (0x62, "Num2"),
     (0x63, "Num3"), (0x64, "Num4"), (0x65, "Num5"), (0x66, "Num6"), (0x67, "Num7"), (0x68, "Num8"),
     (0x69, "Num9"), (0x6A, "Num*"), (0x6B, "Num+"), (0x6D, "Num-"), (0x6E, "Num."), (0x6F, "Num/"),
@@ -402,6 +637,46 @@ mod tests {
         };
         let back: Script = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn validation() {
+        let s = |v: &str| v.to_string();
+        let ok = Script {
+            name: s("ok"),
+            target: Some(TargetRule { exe: s("notepad.exe"), title: s("*") }),
+            trigger: Trigger::OnWindowOpen { delay_s: 1.0 },
+            blocks: vec![
+                Block::SetVar { name: s("n"), expr: s("rand(1, 3) * 2") },
+                Block::Log { text: s("n = {n}") },
+                Block::Repeat { times: s("n"), body: vec![Block::Call { script: s("sub") }] },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(validate(&ok, &[s("sub")]), Vec::<String>::new());
+
+        let bad = Script {
+            name: s("bad"),
+            trigger: Trigger::OnStartup { delay_s: 0.0 },
+            blocks: vec![Block::If {
+                cond: Condition { kind: CondKind::Expr(s("x >")), negate: false },
+                then: vec![Block::SetVar { name: s("1x"), expr: s("2") }, Block::Key { vk: 0, action: KeyAction::Press }],
+                else_: vec![Block::Type { text: s("oi {a +}") }, Block::Call { script: s("nope") }],
+            }],
+            ..Default::default()
+        };
+        let errs = validate(&bad, &[]);
+        let paths: Vec<&str> = errs.iter().map(|e| e.split(':').next().unwrap()).collect();
+        assert_eq!(paths, ["trigger", "blocks[0].cond.kind.Expr", "blocks[0].then[0].name", "blocks[0].then[1].vk", "blocks[0].else_[0].text", "blocks[0].else_[1].script"], "{errs:#?}");
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        assert!(serde_json::from_str::<Script>(r#"{"name":"x","trgger":"Manual"}"#).is_err());
+        assert!(serde_json::from_str::<Script>(r#"{"name":"x","blocks":[{"Wait":{"ms":"1","jitter":0}}]}"#).is_err());
+        let s: Script = serde_json::from_str(r#"{"name":"x","blocks":["Stop",{"Wait":{"ms":"1","jitter_ms":0}}]}"#).unwrap();
+        assert_eq!(s.blocks.len(), 2);
+        assert_eq!(s.speed, 1.0); // missing fields take defaults
     }
 
     #[test]

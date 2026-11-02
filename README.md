@@ -32,7 +32,34 @@ O resultado é um único `target/release/ultratask.exe`. Os scripts ficam em `sc
 ### Expressões
 Os campos numéricos e as condições aceitam expressões ([evalexpr](https://docs.rs/evalexpr)).
 - Exemplos: `contador + 1`, `x * 2`, `rand(100, 300)`, `contem(texto, "OK")`, `a > 3 && b == "fim"`.
-- O bloco **Digitar** interpola `{expressão}`.
+- Os blocos **Digitar** e **Mostrar no log** interpolam `{expressão}`.
+
+### Debug
+- **Mostrar no log**: escreve um texto com variáveis, como `contador = {contador}`.
+- **Breakpoint**: pausa a execução.
+- No painel **Execuções**, cada execução mostra o bloco atual e as variáveis, e tem ⏸/▶ para pausar e continuar a qualquer momento.
+- As execuções terminadas ficam na lista para você conferir os valores finais.
+- **Config → Debug** registra no log cada bloco executado.
+
+### Gatilhos e segundo plano
+Na aba **Config → Gatilho**, um script pode rodar:
+- **ao iniciar o UltraTask**: uma vez, assim que a janela-alvo existir;
+- **sempre que uma nova janela-alvo abrir**: por exemplo, ao abrir o app ou o jogo.
+
+Os dois aceitam um atraso em segundos.
+
+Em **⚙ Ajustes**, a opção **Iniciar com o Windows** faz o UltraTask subir escondido na bandeja (`ultratask.exe --tray`) ao entrar no Windows. Fechar a janela também só esconde o app; gatilhos e atalhos continuam ativos. Abrir o exe de novo mostra a instância que já está rodando.
+
+O tema (sistema/claro/escuro) fica em Ajustes ou no botão ☀/🌙 da barra.
+
+## Scripts gerados por IA
+[`skills/ultratask-scripts/SKILL.md`](skills/ultratask-scripts/SKILL.md) é uma *Agent Skill* que ensina agentes de IA a escrever o JSON dos scripts. Para instalar no Claude Code, copie a pasta para `~/.claude/skills/` (ou para `.claude/skills/` de um projeto). O agente valida o que escreveu com:
+
+```bash
+ultratask.exe --validate "scripts/Meu script.json"
+```
+
+O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 se houver erro. Depois, clique em 🔄 na lista de scripts para recarregar.
 
 ## Limitações conhecidas
 - O modo Segundo plano depende do app. Ele não funciona em:
@@ -46,6 +73,6 @@ Os campos numéricos e as condições aceitam expressões ([evalexpr](https://do
 
 ## Testes
 ```bash
-cargo test                      # interpretador, explode, glob, interpolação, JSON, lParam
-cargo test -- --include-ignored # + E2E real: janela EDIT recebe clique/digitação em segundo plano e o OCR lê de volta
+cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR) e registro numa chave temporária do HKCU
 ```

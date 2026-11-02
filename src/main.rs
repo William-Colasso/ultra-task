@@ -67,6 +67,17 @@ pub fn make_tray(tx: Sender<TrayMsg>, wake: Arc<dyn Fn() + Send + Sync>) -> Opti
 }
 
 fn main() -> eframe::Result {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--validate") {
+        // Release builds have no console of their own; borrow the caller's for the report.
+        unsafe {
+            let _ = windows::Win32::System::Console::AttachConsole(windows::Win32::System::Console::ATTACH_PARENT_PROCESS);
+        }
+        std::process::exit(model::validate_files(&args[1..]));
+    }
+    // A second launch just pops up the running instance (e.g. the hidden autostart one).
+    let Some(show_event) = win::single_instance() else { return Ok(()) };
+    let hidden = args.iter().any(|a| a == "--tray");
     let opts = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("UltraTask")
@@ -75,5 +86,5 @@ fn main() -> eframe::Result {
             .with_icon(eframe::egui::IconData { rgba: icon_rgba(), width: 32, height: 32 }),
         ..Default::default()
     };
-    eframe::run_native("UltraTask", opts, Box::new(|cc| Ok(Box::new(ui::App::new(cc)))))
+    eframe::run_native("UltraTask", opts, Box::new(move |cc| Ok(Box::new(ui::App::new(cc, Some(show_event), hidden)))))
 }
