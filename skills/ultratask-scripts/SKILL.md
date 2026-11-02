@@ -31,6 +31,8 @@ Um script do UltraTask é um arquivo JSON. Ele descreve a janela-alvo e uma árv
 - `"Background"`: envia mensagens direto para a janela. O cursor real não se mexe e vários scripts rodam em paralelo. Serve para apps desktop clássicos (Win32, WinForms, WPF, Bloco de Notas, ERPs).
 - `"Focus"`: traz a janela para frente e usa o mouse/teclado reais (`SendInput` por scancode). Roda um script por vez. Serve para jogos, Chrome/Edge, apps Electron e qualquer app que ignore o modo Background. Combinações como Ctrl+S são confiáveis só neste modo.
 
+Em qualquer modo, o bloco `Uia` (veja *Elementos (UIA)*) age direto num controle, sem mouse nem teclado. Ele roda em paralelo e com a janela coberta, inclusive em apps que ignoram o Background (Chromium 126+, Electron com acessibilidade, WPF, WinForms, UWP, Qt, egui). Prefira `Uia` a `Click` quando o controle tiver nome ou AutomationId.
+
 ## Referência
 
 ### Script (nível de cima)
@@ -49,7 +51,9 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
   "client_size": [800, 600],
   "trigger": { "OnWindowOpen": { "delay_s": 3.0 } },
   "trace": false,
-  "blocks": []
+  "human_mouse": false,
+  "blocks": [],
+  "integrations": []
 }
 ```
 
@@ -57,12 +61,30 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
 |---|---|---|
 | `target` | `exe` compara sem diferenciar maiúsculas. `title` é um glob (`*` e `?`). `null` para sub-rotinas chamadas com `Call`: elas usam a janela de quem chamou | `null` |
 | `simulate_focus` | só no Background: finge que a janela está ativa (alguns apps e jogos exigem isso) | `false` |
-| `speed` | multiplica a velocidade dos blocos `Recording` | `1.0` |
+| `speed` | multiplica a velocidade dos blocos `Recording` e dos trajetos do `human_mouse` | `1.0` |
 | `repeat` | quantas vezes rodar `blocks`; `0` = infinito | `1` |
 | `hotkey` | atalho global; os 5 campos são obrigatórios; `vk` segue a tabela de *Teclas* | `null` |
 | `client_size` | `[w, h]` da área cliente em que as coordenadas foram medidas. Antes de tocar, o app redimensiona a janela para esse tamanho. Use `null` quando não souber | `null` |
 | `trigger` | `"Manual"`, `{"OnStartup":{"delay_s":N}}` (uma vez quando o UltraTask abre e a janela existe) ou `{"OnWindowOpen":{"delay_s":N}}` (a cada nova janela-alvo). Gatilhos exigem `target` | `"Manual"` |
 | `trace` | registra cada bloco no log (debug) | `false` |
+| `human_mouse` | movimento humano do mouse: `Move`, `Click` e `Scroll` levam o ponteiro da posição atual até o alvo por uma curva com aceleração, freada e às vezes uma correção, em vez de saltar. O clique cai no ponto do bloco (± `jitter_px`). Vale nos dois modos; `Recording` não muda. Use `true` quando o app ou jogo estranha cursor que se teletransporta ou quando um arrasto (`Down` → `Move` → `Up`) precisa de movimentos intermediários | `false` |
+| `integrations` | chamadas REST em paralelo ao fluxo (veja *Integrações*) | `[]` |
+
+Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo Foco.
+
+```json
+{
+  "name": "Traço no Paint",
+  "target": { "exe": "mspaint.exe", "title": "*Paint*" },
+  "mode": "Focus",
+  "human_mouse": true,
+  "blocks": [
+    { "Click": { "x": "200", "y": "300", "button": "Left", "kind": "Down", "jitter_px": 0 } },
+    { "Move": { "x": "700", "y": "450" } },
+    { "Click": { "x": "700", "y": "450", "button": "Left", "kind": "Up", "jitter_px": 0 } }
+  ]
+}
+```
 
 ### Blocos
 
@@ -81,6 +103,7 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 { "While": { "cond": COND, "body": [] } }
 { "SetVar": { "name": "contador", "expr": "contador + 1" } }
 { "OcrToVar": { "name": "texto", "region": { "x": 10, "y": 10, "w": 200, "h": 30 } } }
+{ "Uia": { "elem": ELEM, "action": "Invoke", "timeout_ms": "5000", "fallback_click": false } }
 { "Call": { "script": "Login" } }
 { "Log": { "text": "contador = {contador}" } }
 "Breakpoint"
@@ -98,9 +121,12 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 - `WaitUntil`: confere a condição a cada 100 ms. `timeout_ms` é *expr*. `on_timeout`: `"Stop"` encerra com erro, `"Continue"` segue adiante.
 - `Repeat.times` é *expr*. `While` repete enquanto a condição for verdadeira.
 - `SetVar`: `name` é um identificador (letras, dígitos, `_`; não começa com dígito); `expr` é *expr*. `OcrToVar` guarda o texto lido (string, sem espaços nas pontas).
+- `Uia` age num elemento da janela-alvo pela UI Automation; veja *Elementos (UIA)*. Só `elem` e `action` precisam aparecer: `timeout_ms` vale `"5000"` e `fallback_click` vale `false` quando omitidos.
 - `Call` roda outro script da mesma pasta, pelo `name` dele, com a mesma janela e as mesmas variáveis.
 - `Breakpoint` pausa até o usuário clicar ▶ no painel de execuções, onde ele vê as variáveis. `Stop` encerra o script.
 - `Recording` é uma gravação feita pelo app. Copie-a de scripts existentes em vez de escrever à mão: `{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}}, …],"speed":1.0}}`.
+  - O campo opcional `elements` guarda o elemento UIA de cada clique gravado: `"elements":[{"event":1,"elem":ELEM,"action":"Invoke"}]`. `event` é o índice, em `events`, do botão pressionado (`{"Button":["Left",true,x,y]}`); `action` (`"Invoke"`, `"Toggle"` ou `"Select"`) só aparece quando o elemento pode ser acionado sem mouse. Gravações sem `elements` continuam válidas.
+  - A reprodução da gravação ignora `elements`. Ele só serve ao **Explodir em passos** do app: cliques esquerdos simples com `action` viram blocos `Uia` com `"fallback_click": true` (clique no mesmo ponto se o elemento sumir); os demais continuam `Click`. Não edite `elements` à mão.
 
 ### Condições (`COND`)
 
@@ -117,21 +143,130 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 "WindowForeground"
 { "TitleMatches": "*Nível 3*" }
 { "Expr": "contador < 10 && contem(texto, \"OK\")" }
+{ "Uia": { "elem": ELEM, "test": "Exists" } }
 ```
 
 - `Pixel`: cor RGB com tolerância por canal.
 - `OcrContains`: busca o texto sem diferenciar maiúsculas.
+- `Uia`: `test` é `"Exists"`, `{"NameContains": "texto"}`, `{"ValueContains": "texto"}` (sem diferenciar maiúsculas) ou `"Checked"` (caixa marcada). Faz uma busca só, sem esperar; para esperar o elemento, use a condição dentro de `WaitUntil`. Se o elemento não existir ou a UIA falhar, dá falso.
 - Pixel e OCR capturam a janela-alvo; com a janela minimizada a condição dá falso. No modo Background, jogos DirectX podem aparecer pretos: nesse caso use `"Focus"`.
+
+### Elementos (UIA)
+
+`ELEM` identifica um controle dentro da janela-alvo. Todos os campos são opcionais, mas pelo menos um entre `automation_id`, `name`, `control_type` e `class_name` precisa estar preenchido:
+
+```json
+{ "automation_id": "btnSalvar", "name": "Salvar", "control_type": "Button", "class_name": "", "x": 120, "y": 45 }
+```
+
+| Campo | Como casa |
+|---|---|
+| `automation_id` | igual, diferenciando maiúsculas. Quando preenchido, `name` só desempata (o texto do botão pode mudar) |
+| `name` | glob (`*`, `?`), sem diferenciar maiúsculas. Obrigatório casar quando não há `automation_id` |
+| `control_type` | igual ao tipo da UIA, sem o prefixo: `Button`, `Edit`, `CheckBox`, `RadioButton`, `ComboBox`, `ListItem`, `TabItem`, `TreeItem`, `MenuItem`, `Hyperlink`, `Text`, `Pane`, `Window`, `Document`… |
+| `class_name` | desempata; só é obrigatório casar quando não há `automation_id` nem `name` |
+| `ancestors` | lista opcional de `{automation_id, name, control_type, class_name}`, do pai para cima. Só desempata. Omita ao escrever à mão |
+| `x`, `y` | ponto (área cliente) onde o elemento foi capturado: desempata elementos iguais e é onde vai o clique de reserva |
+
+Quem tem os valores é o usuário: o botão 📍 do bloco ou da condição preenche tudo clicando no controle. Ferramentas como o Accessibility Insights ou o Inspect do SDK do Windows também mostram AutomationId, Name e ControlType. Se você não sabe a identificação, escreva o que souber (por exemplo, só `name` e `control_type`) e peça ao usuário para conferir com 📍.
+
+`action` é um destes:
+
+| Ação | Faz |
+|---|---|
+| `"Invoke"` | aciona (botão, link, item de menu) |
+| `"Toggle"` | alterna uma caixa de seleção |
+| `{"SetValue": "texto {expr}"}` | define o valor de um campo; interpola `{expr}` como `Type` |
+| `"Select"` | seleciona (item de lista, aba, botão de opção) |
+| `"Expand"` / `"Collapse"` | expande ou recolhe (árvore, combo, menu) |
+| `{"ReadValue": "var"}` | guarda o valor do campo (string) na variável |
+| `{"ReadName": "var"}` | guarda o nome do elemento (string) na variável |
+
+- O bloco procura o elemento a cada 200 ms até `timeout_ms` (*expr*). Sem achar, para com erro; com `"fallback_click": true`, clica em (`x`, `y`) como o `Click` faz e avisa no log.
+- O elemento precisa oferecer o padrão da ação (Invoke, Toggle, Value, SelectionItem, ExpandCollapse); senão, o bloco para com erro.
+- Se o app demorar mais de 3 s para responder a uma ação (por exemplo, um `Invoke` que abre uma janela modal), o bloco avisa no log e segue. Em `ReadValue`/`ReadName`, isso é erro.
+- Apps rodando como administrador só respondem se o UltraTask também estiver elevado.
 
 ### Expressões
 
 São [evalexpr](https://docs.rs/evalexpr):
 - números `3`, `2.5`; strings `"texto"` (dentro do JSON: `\"texto\"`); booleanos `true`/`false`;
 - operadores `+ - * / % ^`, `== != < > <= >=`, `&& || !`. A divisão de inteiros trunca. `+` concatena duas strings.
-- funções do UltraTask: `rand(a, b)` (inteiro sorteado entre a e b, inclusive) e `contem(texto, trecho)` (busca sem diferenciar maiúsculas);
+- funções do UltraTask: `rand(a, b)` (inteiro sorteado entre a e b, inclusive), `contem(texto, trecho)` (busca sem diferenciar maiúsculas) e `json(texto, "/caminho")` (lê um campo de um texto JSON; veja *Integrações*);
 - funções nativas: `min`, `max`, `floor`, `round`, `ceil`, `len`, `if(cond, a, b)`, `str::to_lowercase`, `str::to_uppercase`, `str::trim`, `str::from`, `str::substring`, `math::abs`, `math::sqrt`.
 
 Variáveis são globais na execução (inclusive dentro de `Call`). Uma variável só existe depois do primeiro `SetVar`/`OcrToVar`; ler antes disso é erro em tempo de execução.
+
+### Integrações (`integrations`)
+
+Uma integração envia dados para fora **em paralelo**: os blocos seguintes não esperam. O fluxo reage pelas variáveis de resultado.
+
+```json
+"integrations": [{
+  "name": "ViaCEP",
+  "when": { "OnSet": ["cep"] },
+  "dest": { "Http": { "method": "GET", "url": "https://viacep.com.br/ws/{cep}/json/", "headers": [], "timeout_ms": 10000 } },
+  "payload": { "Json": ["cep"] },
+  "result": "endereco"
+}]
+```
+
+| Campo | Valores |
+|---|---|
+| `name` | texto não vazio; aparece no log |
+| `when` | `{"OnSet": ["a", "b"]}`: quando um bloco `SetVar`/`OcrToVar` define uma dessas variáveis. `{"Every": {"s": 5.0}}`: a cada N segundos enquanto o script roda (pula se o envio anterior ainda não voltou). `"OnEnd"`: uma vez depois do último bloco; a execução espera a resposta até `timeout_ms` |
+| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string) |
+| `payload` | `{"Json": ["a", "b"]}` envia `{"a": …, "b": …}` (números continuam números). `{"Csv": ["a", "b"]}` envia uma linha CSV. `{"Text": "pedido {n}"}` envia o texto interpolado. Em `GET` o corpo não vai: ponha os valores na `url` |
+| `result` | nome de variável ou `null` |
+
+Para `"result": "r"`, o app cria, desde o início da execução:
+- `r`: o corpo da resposta (texto);
+- `r_ok`: `true` quando o status é 2xx;
+- `r_status`: o status HTTP, ou `0` em erro de rede;
+- `r_pendente`: vira `true` no instante do disparo (ainda dentro do bloco que definiu a variável) e `false` quando a resposta chega.
+
+Regras:
+- Espere a resposta com `WaitUntil` em `"!r_pendente"`, depois confira `r_ok`.
+- Leia campos com `json(r, "/logradouro")` ou `json(r, "/itens/0/preco")` (JSON Pointer). Texto, número e booleano voltam como valores; objeto e lista voltam como texto JSON; campo ausente, `null` ou `r` vazio voltam como `""`.
+- `when.OnSet` não pode conter a própria variável de resultado (nem `r_ok`, `r_status`, `r_pendente`).
+- Respostas não disparam integrações. Para encadear, defina uma variável com `SetVar` depois da resposta.
+- Só valem as integrações do script que está rodando; as de scripts chamados com `Call` ficam inativas.
+- Parar o script descarta as respostas pendentes e não roda o `"OnEnd"`.
+- Os erros (rede, status fora de 2xx, `{expr}` inválida) vão para o log e não param o fluxo.
+- O HTTPS usa os certificados e o proxy do Windows.
+
+Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
+
+```json
+{
+  "name": "Consulta CEP",
+  "target": { "exe": "Notepad.exe", "title": "*Bloco de Notas*" },
+  "integrations": [{
+    "name": "ViaCEP",
+    "when": { "OnSet": ["cep"] },
+    "dest": { "Http": { "method": "GET", "url": "https://viacep.com.br/ws/{cep}/json/", "headers": [], "timeout_ms": 10000 } },
+    "payload": { "Json": ["cep"] },
+    "result": "endereco"
+  }, {
+    "name": "Relatório",
+    "when": "OnEnd",
+    "dest": { "Http": { "method": "POST", "url": "https://exemplo.com/api/relatorio", "headers": [["Authorization", "Bearer {token}"]], "timeout_ms": 5000 } },
+    "payload": { "Text": "cep {cep}: {rua}" },
+    "result": null
+  }],
+  "blocks": [
+    { "SetVar": { "name": "token", "expr": "\"abc123\"" } },
+    { "SetVar": { "name": "rua", "expr": "\"\"" } },
+    { "SetVar": { "name": "cep", "expr": "\"01001000\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!endereco_pendente" }, "negate": false }, "timeout_ms": "15000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "rua", "expr": "json(endereco, \"/logradouro\")" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "endereco_ok && rua != \"\"" }, "negate": false },
+        "then": [ { "Type": { "text": "Rua: {rua}" } } ],
+        "else_": [ { "Log": { "text": "CEP não encontrado (status {endereco_status})" } } ] } }
+  ]
+}
+```
 
 ### Teclas (`vk`, decimal)
 
@@ -147,6 +282,32 @@ Variáveis são globais na execução (inclusive dentro de `Call`). Uma variáve
 | Num0–Num9 | 96–105 |
 
 Para outras teclas, use o código *Virtual-Key* do Windows.
+
+## Exemplo com UI Automation
+
+Preenche um formulário de um app WinForms sem tocar no mouse nem no teclado, marca "Urgente", salva e confere a mensagem de status:
+
+```json
+{
+  "name": "Pedido via UIA",
+  "target": { "exe": "Pedidos.exe", "title": "Pedidos*" },
+  "mode": "Background",
+  "blocks": [
+    { "SetVar": { "name": "n", "expr": "rand(100, 999)" } },
+    { "Uia": { "elem": { "automation_id": "txtCliente", "control_type": "Edit" }, "action": { "SetValue": "Cliente {n}" } } },
+    { "If": {
+        "cond": { "kind": { "Uia": { "elem": { "automation_id": "chkUrgente", "control_type": "CheckBox" }, "test": "Checked" } }, "negate": true },
+        "then": [ { "Uia": { "elem": { "automation_id": "chkUrgente", "control_type": "CheckBox" }, "action": "Toggle" } } ],
+        "else_": [] } },
+    { "Uia": { "elem": { "name": "Salvar", "control_type": "Button", "x": 320, "y": 410 }, "action": "Invoke", "timeout_ms": "3000", "fallback_click": true } },
+    { "WaitUntil": {
+        "cond": { "kind": { "Uia": { "elem": { "automation_id": "lblStatus" }, "test": { "NameContains": "salvo" } } }, "negate": false },
+        "timeout_ms": "10000", "on_timeout": "Stop" } },
+    { "Uia": { "elem": { "automation_id": "lblStatus" }, "action": { "ReadName": "status" } } },
+    { "Log": { "text": "pedido {n}: {status}" } }
+  ]
+}
+```
 
 ## Exemplo completo
 

@@ -472,6 +472,30 @@ mod tests {
         assert!(validate(&p.script, &names).is_empty());
     }
 
+    /// Ticket 09: as integrações viajam dentro do `Script`, e o validador da exportação é o
+    /// mesmo `model::validate` (que valida as integrações).
+    #[test]
+    fn integrations_travel_and_are_validated() {
+        let json = |result: &str| {
+            format!(
+                r#"{{"name":"main","target":{{"exe":"notepad.exe","title":"*"}},"blocks":[{{"Call":{{"script":"sub"}}}}],
+                "integrations":[{{"name":"cep","when":{{"OnSet":["cep"]}},"dest":{{"Http":{{"method":"GET","url":"https://viacep.com.br/ws/{{cep}}/json/","headers":[],"timeout_ms":10000}}}},"payload":{{"Json":["cep"]}},"result":{result}}}]}}"#
+            )
+        };
+        let main: Script = serde_json::from_str(&json(r#""endereco""#)).unwrap();
+        let mut sub: Script = serde_json::from_str(&json("null")).unwrap();
+        sub.name = "sub".into();
+        sub.blocks = vec![Block::Stop];
+        let p = build_payload(&main, &[main.clone(), sub.clone()], &Settings::default()).unwrap();
+        assert_eq!(p.script.integrations, main.integrations);
+        assert_eq!(p.called[0].integrations, sub.integrations);
+        assert_eq!(split_payload(&append_payload(b"MZ", &p)).1, Some(Ok(p)));
+        // Integração disparada pela própria variável de resultado: o validador recusa.
+        let bad: Script = serde_json::from_str(&json(r#""cep""#)).unwrap();
+        let errs = build_payload(&bad, &[bad.clone(), sub], &Settings::default()).unwrap_err();
+        assert!(errs.iter().any(|e| e.starts_with("'main': integrations")), "{errs:?}");
+    }
+
     #[test]
     fn panic_combo_and_names() {
         let hk = Hotkey::csa(b'X' as u16);
