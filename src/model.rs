@@ -253,6 +253,8 @@ pub struct Script {
     pub trigger: Trigger,
     /// Debug: log every block as it runs.
     pub trace: bool,
+    /// Mover/Clique/Rolar levam o ponteiro por um trajeto humano em vez de teletransportar.
+    pub human_mouse: bool,
     pub blocks: Vec<Block>,
 }
 
@@ -269,6 +271,7 @@ impl Default for Script {
             client_size: None,
             trigger: Trigger::Manual,
             trace: false,
+            human_mouse: false,
             blocks: vec![],
         }
     }

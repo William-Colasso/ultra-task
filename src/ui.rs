@@ -814,8 +814,15 @@ impl App {
             });
             ui.end_row();
 
+            ui.label("Mouse");
+            ui.vertical(|ui| {
+                ui.checkbox(&mut s.human_mouse, "Movimento humano do mouse");
+                ui.weak("Mover, Clique e Rolar levam o ponteiro por uma curva, em vez de saltar até o ponto. Blocos de gravação tocam como foram gravados.");
+            });
+            ui.end_row();
+
             ui.label("Debug");
-            ui.checkbox(&mut s.trace, "Registrar cada bloco no log ao rodar");
+            ui.checkbox(&mut s.trace,"Registrar cada bloco no log ao rodar");
             ui.end_row();
 
             ui.label("Tamanho gravado");
