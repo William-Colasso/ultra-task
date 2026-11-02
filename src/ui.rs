@@ -1,4 +1,6 @@
 use crate::hooks::{self, Cmd, Hooks, Out};
+use crate::catalog::{self, FieldKind};
+use crate::manual::{self, Section};
 use crate::model::{self, *};
 use crate::runner::{self, RunHandle};
 use crate::win::{self, Hwnd, WinInfo};
@@ -67,6 +69,7 @@ pub struct App {
     seen: HashMap<String, HashSet<Hwnd>>,
     /// `--tray`: eframe always shows the window after its first frame, so re-hide for a few frames.
     hide_frames: u8,
+    manual: manual::Manual,
 }
 
 fn theme_pref(t: Theme) -> egui::ThemePreference {
@@ -134,6 +137,7 @@ impl App {
             startup_done: HashSet::new(),
             seen: HashMap::new(),
             hide_frames: if start_hidden { 3 } else { 0 },
+            manual: Default::default(),
         };
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
@@ -506,6 +510,9 @@ impl App {
                 if ui.button("⚙ Ajustes").clicked() {
                     self.show_settings = !self.show_settings;
                 }
+                if ui.button("📖 Manual").clicked() {
+                    self.manual.open = !self.manual.open;
+                }
                 let dark = ui.ctx().theme() == egui::Theme::Dark;
                 if ui.button(if dark { "☀" } else { "🌙" }).on_hover_text("Alternar tema claro/escuro").clicked() {
                     self.settings.theme = if dark { Theme::Light } else { Theme::Dark };
@@ -687,10 +694,11 @@ impl App {
         // ponytail: change detection by comparing against a clone; cheap since egui only repaints on input.
         let before = self.scripts[i].clone();
         let names: Vec<String> = self.scripts.iter().map(|s| s.name.clone()).collect();
+        let vars = catalog::script_vars(&self.scripts[i], &self.scripts);
         match self.tab {
             Tab::Blocks => {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut ec = EditCtx { names: &names, pick_req: &mut self.pick_req, pick_result: &mut self.pick_result };
+                    let mut ec = EditCtx { names: &names, pick_req: &mut self.pick_req, pick_result: &mut self.pick_result, vars: &vars, manual: &mut self.manual };
                     blocks_ui(ui, &mut self.scripts[i].blocks, Id::unique("blocks"), &mut ec);
                 });
             }
@@ -978,6 +986,7 @@ impl eframe::App for App {
         egui::Panel::left("left").resizable(true).default_size(240.0).show(ui, |ui| self.library(ui));
         egui::CentralPanel::default().show(ui, |ui| self.center(ui, &ctx));
         self.modals(&ctx);
+        manual::window(&ctx, &mut self.manual, &self.settings);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -992,6 +1001,9 @@ struct EditCtx<'a> {
     names: &'a [String],
     pick_req: &'a mut Option<Pick>,
     pick_result: &'a mut Option<(Id, PickData)>,
+    /// Variáveis do script, para a cola.
+    vars: &'a [String],
+    manual: &'a mut manual::Manual,
 }
 
 impl EditCtx<'_> {
@@ -1100,20 +1112,35 @@ fn blocks_ui(ui: &mut Ui, blocks: &mut Vec<Block>, id: Id, ec: &mut EditCtx) {
     });
 }
 
-fn expr_edit(ui: &mut Ui, s: &mut String, width: f32) {
+fn expr_edit(ui: &mut Ui, s: &mut String, width: f32, id: Id, ec: &mut EditCtx) {
     let ok = model::expr_error(s).is_none();
-    let mut te = egui::TextEdit::singleline(s).desired_width(width);
-    if !ok {
-        te = te.text_color(Color32::from_rgb(230, 60, 60));
+    let (r, ask) = crate::cola::field(ui, id, s, width, FieldKind::Expr, ec.vars, "", !ok);
+    r.on_hover_text(if ok { "número ou expressão (ex.: x + 10, rand(1, 5))" } else { "expressão inválida" });
+    if ask {
+        ec.manual.ask(Section::Expressoes);
     }
-    ui.add(te).on_hover_text(if ok { "número ou expressão (ex.: x + 10, rand(1, 5))" } else { "expressão inválida" });
+}
+
+/// Campo de texto com `{expressão}` (Digitar, Mostrar no log), com cola dentro das chaves.
+fn text_edit(ui: &mut Ui, s: &mut String, id: Id, ec: &mut EditCtx, hint: &str) {
+    if crate::cola::field(ui, id, s, 320.0, FieldKind::Text, ec.vars, hint, false).1 {
+        ec.manual.ask(Section::Expressoes);
+    }
+    help_btn(ui, ec);
+}
+
+/// "?" junto ao campo: abre o Manual em Expressões.
+fn help_btn(ui: &mut Ui, ec: &mut EditCtx) {
+    if ui.small_button("?").on_hover_text("Manual: expressões").clicked() {
+        ec.manual.ask(Section::Expressoes);
+    }
 }
 
 fn xy_ui(ui: &mut Ui, x: &mut String, y: &mut String, id: Id, ec: &mut EditCtx) -> Option<[u8; 3]> {
     ui.label("x");
-    expr_edit(ui, x, 90.0);
+    expr_edit(ui, x, 90.0, id.with("x"), ec);
     ui.label("y");
-    expr_edit(ui, y, 90.0);
+    expr_edit(ui, y, 90.0, id.with("y"), ec);
     if ui.small_button("📍").on_hover_text("Capturar clicando na janela-alvo").clicked() {
         *ec.pick_req = Some(Pick::Point(id));
     }
@@ -1193,7 +1220,7 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             enum_combo(ui, action, id.with("a"), &[(KeyAction::Press, "apertar"), (KeyAction::Down, "pressionar"), (KeyAction::Up, "soltar")]);
         }
         Block::Type { text } => {
-            ui.add(egui::TextEdit::singleline(text).desired_width(320.0).hint_text("texto; use {variavel} ou {expressão}"));
+            text_edit(ui, text, id.with("text"), ec, "texto; use {variavel} ou {expressão}");
         }
         Block::Scroll { x, y, delta } => {
             xy_ui(ui, x, y, id, ec);
@@ -1201,26 +1228,27 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             ui.weak("(120 = um passo; negativo = para baixo)");
         }
         Block::Wait { ms, jitter_ms } => {
-            expr_edit(ui, ms, 80.0);
+            expr_edit(ui, ms, 80.0, id.with("ms"), ec);
             ui.label("ms");
             ui.add(DragValue::new(jitter_ms).range(0..=60_000).prefix("± ").suffix(" ms"));
         }
         Block::WaitUntil { cond, timeout_ms, on_timeout } => {
             cond_ui(ui, cond, id.with("c"), ec);
             ui.label("timeout");
-            expr_edit(ui, timeout_ms, 70.0);
+            expr_edit(ui, timeout_ms, 70.0, id.with("to"), ec);
             ui.label("ms, então");
             enum_combo(ui, on_timeout, id.with("t"), &[(OnTimeout::Stop, "parar com erro"), (OnTimeout::Continue, "continuar")]);
         }
         Block::If { cond, .. } | Block::While { cond, .. } => cond_ui(ui, cond, id.with("c"), ec),
         Block::Repeat { times, .. } => {
-            expr_edit(ui, times, 60.0);
+            expr_edit(ui, times, 60.0, id.with("n"), ec);
             ui.label("vezes");
         }
         Block::SetVar { name, expr } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
             ui.label("=");
-            expr_edit(ui, expr, 240.0);
+            expr_edit(ui, expr, 240.0, id.with("e"), ec);
+            help_btn(ui, ec);
         }
         Block::OcrToVar { name, region } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
@@ -1235,7 +1263,7 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             });
         }
         Block::Log { text } => {
-            ui.add(egui::TextEdit::singleline(text).desired_width(320.0).hint_text("ex.: contador = {contador}"));
+            text_edit(ui, text, id.with("text"), ec, "ex.: contador = {contador}");
         }
         Block::Breakpoint => {
             ui.weak("pausa a execução aqui; veja as variáveis no painel e clique ▶ para continuar");
@@ -1281,7 +1309,10 @@ fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
         CondKind::TitleMatches(p) => {
             ui.add(egui::TextEdit::singleline(p).desired_width(200.0));
         }
-        CondKind::Expr(s) => expr_edit(ui, s, 240.0),
+        CondKind::Expr(s) => {
+            expr_edit(ui, s, 240.0, id.with("expr"), ec);
+            help_btn(ui, ec);
+        }
         CondKind::WindowExists | CondKind::WindowForeground => {}
     }
 }
@@ -1296,7 +1327,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("catalog.rs"), include_str!("cola.rs"), include_str!("manual.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
@@ -1312,5 +1343,32 @@ mod tests {
         }
         let missing: String = ctx.fonts_mut(|f| chars.into_iter().filter(|&c| !f.has_glyph(&egui::FontId::proportional(14.0), c) || !f.has_glyph(&egui::FontId::monospace(14.0), c)).collect());
         assert!(missing.is_empty(), "sem glifo: {missing:?}");
+    }
+
+    /// Clicar no "?" junto a um campo abre o Manual direto em Expressões.
+    #[test]
+    fn help_button_opens_expressions() {
+        let ctx = egui::Context::default();
+        let mut manual = manual::Manual { open: false, section: Section::Teclas };
+        let (mut pr, mut res) = (None, None);
+        let mut rect = egui::Rect::NOTHING;
+        for events in [vec![], vec![], vec![true], vec![false]] {
+            let events = events
+                .into_iter()
+                .flat_map(|down| {
+                    let pos = rect.center();
+                    [egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: down, modifiers: Default::default() }]
+                })
+                .collect();
+            ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                let mut ec = EditCtx { names: &[], pick_req: &mut pr, pick_result: &mut res, vars: &[], manual: &mut manual };
+                help_btn(ui, &mut ec);
+                rect = ui.min_rect();
+            })
+            .textures_delta
+            .clear();
+        }
+        assert!(manual.open);
+        assert_eq!(manual.section, Section::Expressoes);
     }
 }

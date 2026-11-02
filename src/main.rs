@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod catalog;
+mod cola;
 mod hooks;
+mod manual;
 mod model;
 mod runner;
 mod ui;

@@ -67,24 +67,40 @@ fn jit(v: i64, j: u32) -> i64 {
     if j == 0 { v } else { v + fastrand::i64(-(j as i64)..=j as i64) }
 }
 
-impl<'a> Interp<'a> {
-    pub fn new(io: &'a mut dyn Io, stop: &'a AtomicBool, scripts: &'a [Script], speed: f32, log: &'a mut dyn FnMut(String), dbg: &'a Debug) -> Self {
-        let mut vars = HashMapContext::new();
-        let _ = vars.set_function(
-            "rand".into(),
+/// Funções que o UltraTask acrescenta ao evalexpr. Toda função nova entra aqui e em
+/// `catalog::FUNCTIONS` (um teste confere).
+pub fn custom_functions() -> Vec<(&'static str, Function<evalexpr::DefaultNumericTypes>)> {
+    vec![
+        (
+            "rand",
             Function::new(|a: &Value| -> EvalexprResult<Value> {
                 let t = a.as_fixed_len_tuple(2)?;
                 let (x, y): (i64, i64) = (t[0].as_int()?, t[1].as_int()?);
                 Ok(Value::Int(fastrand::i64(x.min(y)..=x.max(y))))
             }),
-        );
-        let _ = vars.set_function(
-            "contem".into(),
+        ),
+        (
+            "contem",
             Function::new(|a: &Value| -> EvalexprResult<Value> {
                 let t = a.as_fixed_len_tuple(2)?;
                 Ok(Value::Boolean(t[0].as_string()?.to_lowercase().contains(&t[1].as_string()?.to_lowercase())))
             }),
-        );
+        ),
+    ]
+}
+
+/// Contexto de expressões novo, sem variáveis, com as funções do UltraTask.
+pub fn new_context() -> HashMapContext {
+    let mut vars = HashMapContext::new();
+    for (name, f) in custom_functions() {
+        let _ = vars.set_function(name.into(), f);
+    }
+    vars
+}
+
+impl<'a> Interp<'a> {
+    pub fn new(io: &'a mut dyn Io, stop: &'a AtomicBool, scripts: &'a [Script], speed: f32, log: &'a mut dyn FnMut(String), dbg: &'a Debug) -> Self {
+        let vars = new_context();
         Interp { io, vars, stop, scripts, speed, log, dbg, trace: false, depth: 0, last_warn: String::new() }
     }
 
