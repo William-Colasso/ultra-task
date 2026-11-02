@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod compat;
+mod export;
 mod hooks;
 mod model;
 mod runner;
@@ -68,6 +69,15 @@ pub fn make_tray(tx: Sender<TrayMsg>, wake: Arc<dyn Fn() + Send + Sync>) -> Opti
 }
 
 fn main() -> eframe::Result {
+    // Um .exe exportado (ticket 05) só toca o script embutido; o editor nem abre.
+    match export::read_own_payload() {
+        Some(Ok(p)) => std::process::exit(export::run_player(p)),
+        Some(Err(e)) => {
+            compat::error_box(&format!("Este .exe exportado está corrompido: {e}"));
+            std::process::exit(1);
+        }
+        None => {}
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "--validate") {
         // Release builds have no console of their own; borrow the caller's for the report.

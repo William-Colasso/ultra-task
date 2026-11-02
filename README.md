@@ -59,6 +59,23 @@ Em **⚙ Ajustes**, a opção **Iniciar com o Windows** faz o UltraTask subir es
 
 O tema (sistema/claro/escuro) fica em Ajustes ou no botão ☀/🌙 da barra.
 
+### Exportar como .exe
+**📦 Exportar .exe** (na lista de scripts) grava um executável que só toca o script selecionado. Ele é uma cópia do UltraTask que leva embutidos:
+- o script e todos os scripts que ele chama com **Chamar script**, em cadeia;
+- os ajustes de reprodução: atalho de pânico, retomada do modo Foco e ampliação do OCR.
+
+A exportação é recusada, com o motivo no log, se o script não tem janela-alvo ou blocos, se falta algum script chamado ou se o validador reprova algum deles.
+
+Ao abrir o .exe exportado:
+- nenhuma janela de edição aparece; ele procura a janela-alvo pela regra do script e, se ela não existir, espera que apareça (o ícone da bandeja mostra "Aguardando janela…");
+- toca com o modo e as repetições do script, ignorando o gatilho e o atalho dele;
+- **Parar** no menu da bandeja ou o atalho de pânico interrompem e soltam as teclas e botões presos;
+- sai com código **0** (terminou), **1** (erro) ou **2** (parado). Aberto num terminal, mostra o log ali. Como é um app de janela, use `start /wait meu.exe` no cmd ou `(Start-Process .\meu.exe -Wait -PassThru).ExitCode` no PowerShell para esperar e ler o código.
+
+Ele não lê nem grava os ajustes nem a pasta de scripts do UltraTask, e não conflita com o UltraTask aberto nem com outros .exe exportados (vários podem rodar ao mesmo tempo no modo Segundo plano).
+
+> **Antivírus:** executáveis de macro que simulam teclado e mouse e não são assinados costumam ser estranhados por antivírus e pelo SmartScreen ("O Windows protegeu o computador"). Se for distribuir o .exe, avise quem vai usar ou assine o arquivo.
+
 ## Scripts gerados por IA
 [`skills/ultratask-scripts/SKILL.md`](skills/ultratask-scripts/SKILL.md) é uma *Agent Skill* que ensina agentes de IA a escrever o JSON dos scripts. Para instalar no Claude Code, copie a pasta para `~/.claude/skills/` (ou para `.claude/skills/` de um projeto). O agente valida o que escreveu com:
 

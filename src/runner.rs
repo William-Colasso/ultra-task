@@ -459,6 +459,17 @@ pub struct RunHandle {
     pub status: Arc<Mutex<String>>,
     pub done: Arc<AtomicBool>,
     pub dbg: Arc<Debug>,
+    /// Valid once `done`: see [`exit_code`].
+    pub exit_code: Arc<std::sync::atomic::AtomicI32>,
+}
+
+/// Process exit code for a finished run (used by exported .exe files): 0 ok, 1 error, 2 stopped.
+pub fn exit_code(r: &Result<(), Halt>) -> i32 {
+    match r {
+        Ok(()) => 0,
+        Err(Halt::Error(_)) => 1,
+        Err(Halt::Stopped) => 2,
+    }
 }
 
 struct WinIo {
@@ -550,6 +561,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
     let status = Arc::new(Mutex::new("Iniciando".to_string()));
     let done = Arc::new(AtomicBool::new(false));
     let dbg = Arc::new(Debug::default());
+    let code = Arc::new(std::sync::atomic::AtomicI32::new(0));
     let h = RunHandle {
         script: script.name.clone(),
         window: target.title.clone(),
@@ -557,6 +569,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
         status: status.clone(),
         done: done.clone(),
         dbg: dbg.clone(),
+        exit_code: code.clone(),
     };
     let (idle_ms, ocr_scale) = ((settings.idle_resume_s * 1000.0) as u64, settings.ocr_scale);
     std::thread::spawn(move || {
@@ -623,6 +636,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
         if focus {
             hooks::watch_physical(false);
         }
+        code.store(exit_code(&result), Ordering::SeqCst);
         match result {
             Ok(()) => say("terminou".into()),
             Err(Halt::Stopped) => say("parado".into()),

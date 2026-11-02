@@ -562,6 +562,13 @@ impl App {
                 if ui.button("🗑 Excluir").clicked() {
                     self.confirm_delete = true;
                 }
+                if ui.button("📦 Exportar .exe").on_hover_text("Grava um .exe que só toca este script (com os scripts que ele chama)").clicked() {
+                    self.save_dirty();
+                    match crate::export::export_interactive(&self.scripts[i], &self.scripts, &self.settings) {
+                        Ok(Some(m)) | Err(m) => self.say(m),
+                        Ok(None) => {}
+                    }
+                }
             }
         });
         if let Some(buf) = &mut self.rename {
@@ -1299,7 +1306,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("compat.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("compat.rs"), include_str!("export.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
