@@ -582,7 +582,15 @@ pub fn ocr(img: &Image) -> Result<String, String> {
     unsafe {
         let _ = RoInitialize(RO_INIT_MULTITHREADED);
     }
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages().map_err(e)?;
+    // Sem idioma com OCR o Windows devolve um motor nulo (Err aqui): explique como instalar.
+    let profile = OcrEngine::TryCreateFromUserProfileLanguages();
+    let langs = OcrEngine::AvailableRecognizerLanguages().ok();
+    let n = langs.as_ref().and_then(|l| l.Size().ok()).unwrap_or(0) as usize;
+    let engine = match (crate::compat::choose_ocr(profile.is_ok(), n), profile) {
+        (crate::compat::OcrChoice::UserProfile, Ok(engine)) => engine,
+        (crate::compat::OcrChoice::FirstInstalled, _) => langs.and_then(|l| l.GetAt(0).ok()).and_then(|l| OcrEngine::TryCreateFromLanguage(&l).ok()).ok_or_else(|| crate::compat::ocr_missing_message(""))?,
+        (_, p) => return Err(crate::compat::ocr_missing_message(&p.err().map(|e| e.message()).unwrap_or_default())),
+    };
     let buf = CryptographicBuffer::CreateFromByteArray(&img.bgra).map_err(e)?;
     let bmp = SoftwareBitmap::CreateCopyFromBuffer(&buf, BitmapPixelFormat::Bgra8, img.w, img.h).map_err(e)?;
     let res = engine.RecognizeAsync(&bmp).map_err(e)?.join().map_err(e)?;

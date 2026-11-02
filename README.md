@@ -3,9 +3,16 @@
 UltraTask é um gravador e reprodutor de macros para Windows, inspirado no TinyTask e escrito todo em Rust.
 A diferença principal é que cada script roda **numa janela-alvo** e, no modo Segundo plano, não toma o seu mouse nem o teclado.
 
+## Requisitos
+- Windows 10 ou 11 de 64 bits. Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
+  - Não depende do runtime do Visual C++ (o CRT vai embutido no exe) e só usa DLLs que vêm com o Windows.
+  - Funciona sem placa de vídeo (VM, área de trabalho remota, Windows Sandbox sem vGPU). Se o OpenGL não abrir, o UltraTask se reabre sozinho com `--render-software`, que desenha a janela com Direct3D 12 por software (WARP, que vem no Windows). Esse argumento também pode ser passado à mão.
+  - Os blocos e condições de OCR precisam de um idioma com OCR no Windows. Sem nenhum, eles falham com uma mensagem que diz como instalar: **Configurações > Hora e idioma > Idioma e região > Português (Brasil) > Opções de idioma > Reconhecimento óptico de caracteres**, ou, no PowerShell como administrador, `Add-WindowsCapability -Online -Name "Language.OCR~~~pt-BR~0.0.1.0"`.
+- Scripts e ajustes ficam ao lado do exe. Se essa pasta não aceita escrita (ex.: `C:\Program Files`), o UltraTask avisa no log e usa `%LOCALAPPDATA%\UltraTask`.
+
 ## Build
 
-Requer Rust (toolchain `stable-msvc`) e o Visual Studio Build Tools com C++.
+Requer Rust (toolchain `stable-msvc`) e o Visual Studio Build Tools com C++. O `.cargo/config.toml` liga o CRT estático (`+crt-static`) nos alvos MSVC.
 
 ```bash
 cargo build --release

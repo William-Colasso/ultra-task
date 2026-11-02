@@ -138,6 +138,9 @@ impl App {
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
         }
+        for w in [crate::compat::data_dir().warning.clone(), crate::compat::render_note(cc)].into_iter().flatten() {
+            app.say(w);
+        }
         if app.settings.start_with_windows {
             // Re-write so the entry follows the exe if it was moved.
             if let Err(e) = win::set_autostart(true) {
@@ -1296,7 +1299,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("compat.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
