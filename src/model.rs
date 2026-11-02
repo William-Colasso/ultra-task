@@ -337,13 +337,10 @@ impl Default for Settings {
     }
 }
 
-// ---------- storage (portable: next to the exe) ----------
+// ---------- storage (portable: next to the exe; %LOCALAPPDATA%\UltraTask if that folder is read-only) ----------
 
 pub fn base_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::compat::data_dir().path.clone()
 }
 
 fn scripts_dir() -> PathBuf {

@@ -3,7 +3,9 @@
 mod bgkeys;
 mod catalog;
 mod cola;
+mod compat;
 mod editor;
+mod export;
 mod hooks;
 mod humanmouse;
 mod integrations;
@@ -78,6 +80,15 @@ pub fn make_tray(tx: Sender<TrayMsg>, wake: Arc<dyn Fn() + Send + Sync>) -> Opti
 }
 
 fn main() -> eframe::Result {
+    // Um .exe exportado (ticket 05) só toca o script embutido; o editor nem abre.
+    match export::read_own_payload() {
+        Some(Ok(p)) => std::process::exit(export::run_player(p)),
+        Some(Err(e)) => {
+            compat::error_box(&format!("Este .exe exportado está corrompido: {e}"));
+            std::process::exit(1);
+        }
+        None => {}
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "--validate") {
         // Release builds have no console of their own; borrow the caller's for the report.
@@ -89,7 +100,8 @@ fn main() -> eframe::Result {
     // A second launch just pops up the running instance (e.g. the hidden autostart one).
     let Some(show_event) = win::single_instance() else { return Ok(()) };
     let hidden = args.iter().any(|a| a == "--tray");
-    let opts = eframe::NativeOptions {
+    let render = compat::render_from_args(&args);
+    let mut opts = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("UltraTask")
             .with_inner_size([1000.0, 700.0])
@@ -97,5 +109,31 @@ fn main() -> eframe::Result {
             .with_icon(eframe::egui::IconData { rgba: icon_rgba(), width: 32, height: 32 }),
         ..Default::default()
     };
-    eframe::run_native("UltraTask", opts, Box::new(move |cc| Ok(Box::new(ui::App::new(cc, Some(show_event), hidden)))))
+    compat::apply_render(render, &mut opts);
+    // OpenGL ausente (VM/RDP sem GPU) faz o run_native falhar antes de criar o app. O event loop
+    // do winit não pode ser recriado, então o fallback para software é relançar o exe.
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let s2 = started.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "UltraTask",
+            opts,
+            Box::new(move |cc| {
+                s2.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(Box::new(ui::App::new(cc, Some(show_event), hidden)))
+            }),
+        )
+    }));
+    let err = match result {
+        Ok(Ok(())) => return Ok(()),
+        Ok(Err(e)) => e.to_string(),
+        Err(_) => "pânico ao abrir a janela".to_string(),
+    };
+    if let Some(a) = compat::relaunch_args(&args, render, started.load(std::sync::atomic::Ordering::SeqCst))
+        && compat::relaunch(&a, show_event).is_ok()
+    {
+        return Ok(());
+    }
+    compat::error_box(&format!("O UltraTask não conseguiu abrir a janela ({}): {err}", if render == compat::Render::Software { "Direct3D 12 / WARP" } else { "OpenGL" }));
+    std::process::exit(1);
 }

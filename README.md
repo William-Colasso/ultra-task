@@ -3,9 +3,16 @@
 UltraTask é um gravador e reprodutor de macros para Windows, inspirado no TinyTask e escrito todo em Rust.
 A diferença principal é que cada script roda **numa janela-alvo** e, no modo Segundo plano, não toma o seu mouse nem o teclado.
 
+## Requisitos
+- Windows 10 ou 11 de 64 bits. Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
+  - Não depende do runtime do Visual C++ (o CRT vai embutido no exe) e só usa DLLs que vêm com o Windows.
+  - Funciona sem placa de vídeo (VM, área de trabalho remota, Windows Sandbox sem vGPU). Se o OpenGL não abrir, o UltraTask se reabre sozinho com `--render-software`, que desenha a janela com Direct3D 12 por software (WARP, que vem no Windows). Esse argumento também pode ser passado à mão.
+  - Os blocos e condições de OCR precisam de um idioma com OCR no Windows. Sem nenhum, eles falham com uma mensagem que diz como instalar: **Configurações > Hora e idioma > Idioma e região > Português (Brasil) > Opções de idioma > Reconhecimento óptico de caracteres**, ou, no PowerShell como administrador, `Add-WindowsCapability -Online -Name "Language.OCR~~~pt-BR~0.0.1.0"`.
+- Scripts e ajustes ficam ao lado do exe. Se essa pasta não aceita escrita (ex.: `C:\Program Files`), o UltraTask avisa no log e usa `%LOCALAPPDATA%\UltraTask`.
+
 ## Build
 
-Requer Rust (toolchain `stable-msvc`) e o Visual Studio Build Tools com C++.
+Requer Rust (toolchain `stable-msvc`) e o Visual Studio Build Tools com C++. O `.cargo/config.toml` liga o CRT estático (`+crt-static`) nos alvos MSVC.
 
 ```bash
 cargo build --release
@@ -64,6 +71,23 @@ Os dois aceitam um atraso em segundos.
 Em **⚙ Ajustes**, a opção **Iniciar com o Windows** faz o UltraTask subir escondido na bandeja (`ultratask.exe --tray`) ao entrar no Windows. Fechar a janela também só esconde o app; gatilhos e atalhos continuam ativos. Abrir o exe de novo mostra a instância que já está rodando.
 
 O tema (sistema/claro/escuro) fica em Ajustes ou no botão ☀/🌙 da barra.
+
+### Exportar como .exe
+**📦 Exportar .exe** (na lista de scripts) grava um executável que só toca o script selecionado. Ele é uma cópia do UltraTask que leva embutidos:
+- o script e todos os scripts que ele chama com **Chamar script**, em cadeia, com as integrações de cada um (só as do script principal ficam ativas, como no app);
+- os ajustes de reprodução: atalho de pânico, retomada do modo Foco e ampliação do OCR.
+
+A exportação é recusada, com o motivo no log, se o script não tem janela-alvo ou blocos, se falta algum script chamado ou se o validador reprova algum deles.
+
+Ao abrir o .exe exportado:
+- nenhuma janela de edição aparece; ele procura a janela-alvo pela regra do script e, se ela não existir, espera que apareça (o ícone da bandeja mostra "Aguardando janela…");
+- toca com o modo e as repetições do script, ignorando o gatilho e o atalho dele;
+- **Parar** no menu da bandeja ou o atalho de pânico interrompem e soltam as teclas e botões presos;
+- sai com código **0** (terminou), **1** (erro) ou **2** (parado). Aberto num terminal, mostra o log ali. Como é um app de janela, use `start /wait meu.exe` no cmd ou `(Start-Process .\meu.exe -Wait -PassThru).ExitCode` no PowerShell para esperar e ler o código.
+
+Ele não lê nem grava os ajustes nem a pasta de scripts do UltraTask, e não conflita com o UltraTask aberto nem com outros .exe exportados (vários podem rodar ao mesmo tempo no modo Segundo plano).
+
+> **Antivírus:** executáveis de macro que simulam teclado e mouse e não são assinados costumam ser estranhados por antivírus e pelo SmartScreen ("O Windows protegeu o computador"). Se for distribuir o .exe, avise quem vai usar ou assine o arquivo.
 
 ### Integrações
 A aba **Integrações** de cada script liga o fluxo a serviços externos sem travá-lo. Cada integração tem:

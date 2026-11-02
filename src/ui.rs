@@ -150,6 +150,9 @@ impl App {
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
         }
+        for w in [crate::compat::data_dir().warning.clone(), crate::compat::render_note(cc)].into_iter().flatten() {
+            app.say(w);
+        }
         if app.settings.start_with_windows {
             // Re-write so the entry follows the exe if it was moved.
             if let Err(e) = win::set_autostart(true) {
@@ -578,6 +581,13 @@ impl App {
                 }
                 if ui.button("🗑 Excluir").clicked() {
                     self.confirm_delete = true;
+                }
+                if ui.button("📦 Exportar .exe").on_hover_text("Grava um .exe que só toca este script (com os scripts que ele chama)").clicked() {
+                    self.save_dirty();
+                    match crate::export::export_interactive(&self.scripts[i], &self.scripts, &self.settings) {
+                        Ok(Some(m)) | Err(m) => self.say(m),
+                        Ok(None) => {}
+                    }
                 }
             }
         });
@@ -1388,7 +1398,9 @@ mod tests {
             include_str!("catalog.rs"),
             include_str!("bgkeys.rs"),
             include_str!("cola.rs"),
+            include_str!("compat.rs"),
             include_str!("editor.rs"),
+            include_str!("export.rs"),
             include_str!("humanmouse.rs"),
             include_str!("integrations/editor.rs"),
             include_str!("integrations/engine.rs"),
