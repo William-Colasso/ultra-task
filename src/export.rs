@@ -301,38 +301,44 @@ pub fn run_player(p: Payload) -> i32 {
             }
         }
     };
-    let Some(rule) = p.script.target.clone() else {
-        say(&format!("[{name}] erro: o script não tem janela-alvo"));
-        return 1;
-    };
     // O modo Foco pausa quando você mexe no mouse/teclado; isso precisa dos hooks.
     let _hooks = (p.script.mode == model::Mode::Focus).then(|| hooks::Hooks::start(|| {}));
-    let mut waiting = false;
-    let target = loop {
-        pump();
-        if stop.load(Ordering::SeqCst) {
-            say(&format!("[{name}] parado"));
-            return 2;
-        }
-        if let Some(w) = win::find_matches(&rule).into_iter().next() {
-            break w;
-        }
-        if !waiting {
-            waiting = true;
-            set_tip("Aguardando janela…");
-            say(&format!("[{name}] aguardando janela {} / \"{}\"", rule.exe, rule.title));
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    };
-    if !win::self_elevated() && win::is_elevated_pid(target.pid) {
-        say(&format!("[{name}] erro: '{}' roda como administrador; rode este .exe como administrador também", target.title));
-        return 1;
-    }
-    set_tip("Rodando");
-    say(&format!("[{name}] janela-alvo: {}", target.label()));
     let (tx, rx) = std::sync::mpsc::channel();
     let all: Vec<Script> = std::iter::once(p.script.clone()).chain(p.called.iter().cloned()).collect();
-    let h = runner::spawn(p.script.clone(), all, target, &player_settings(&p), 0, tx, Arc::new(|| {}));
+    let h = if p.script.cdp.is_some() {
+        // Modo Navegador (CDP): o próprio UltraTask abre o app, então não há janela para esperar.
+        set_tip("Rodando");
+        crate::cdp::spawn(p.script.clone(), all, &player_settings(&p), 0, tx, Arc::new(|| {}))
+    } else {
+        let Some(rule) = p.script.target.clone() else {
+            say(&format!("[{name}] erro: o script não tem janela-alvo"));
+            return 1;
+        };
+        let mut waiting = false;
+        let target = loop {
+            pump();
+            if stop.load(Ordering::SeqCst) {
+                say(&format!("[{name}] parado"));
+                return 2;
+            }
+            if let Some(w) = win::find_matches(&rule).into_iter().next() {
+                break w;
+            }
+            if !waiting {
+                waiting = true;
+                set_tip("Aguardando janela…");
+                say(&format!("[{name}] aguardando janela {} / \"{}\"", rule.exe, rule.title));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        };
+        if !win::self_elevated() && win::is_elevated_pid(target.pid) {
+            say(&format!("[{name}] erro: '{}' roda como administrador; rode este .exe como administrador também", target.title));
+            return 1;
+        }
+        set_tip("Rodando");
+        say(&format!("[{name}] janela-alvo: {}", target.label()));
+        runner::spawn(p.script.clone(), all, target, &player_settings(&p), 0, tx, Arc::new(|| {}))
+    };
     while !h.done.load(Ordering::SeqCst) {
         pump();
         while let Ok(l) = rx.try_recv() {

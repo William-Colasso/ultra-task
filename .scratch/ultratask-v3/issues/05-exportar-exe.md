@@ -86,3 +86,9 @@ Preparação: `cargo build --release`; abrir `target\release\ultratask.exe`; cri
 4. **Dois exportados em paralelo.** Exportar também um segundo script (alvo `mspaint.exe` ou outro Bloco de Notas, modo Segundo plano, `Repetir 20` com `Digitar "b"` + `Esperar 300`). Com o UltraTask aberto, abrir os dois .exe juntos: os dois digitam ao mesmo tempo, o editor continua usável, e cada processo sai sozinho no fim.
 5. **Parar e pânico.** Exportar um script em modo Foco com `Tecla Shift Down` → `Esperar 30000` → `Tecla Shift Up`. Abrir, esperar começar, clicar no ícone da bandeja > **Parar**: o processo sai com código 2 e o Shift não fica preso (digitar no Bloco de Notas sai em minúsculas). Repetir com o atalho de pânico (`Ctrl+Shift+Alt+X`) em vez do menu, com o UltraTask aberto e também tocando algo: o exportado e o UltraTask param juntos. Repetir no modo Segundo plano com `Clique` tipo `Down` em vez da tecla: o botão é solto.
 6. **Ajustes embutidos.** Mudar o atalho de pânico em ⚙ Ajustes para outro (ex.: `Ctrl+Shift+Alt+Q`), exportar e conferir que o exportado para com o novo atalho e não com o antigo.
+
+### Ajuste na integração 05 × 18 (feito por quem integrou os branches)
+- `cdp::spawn` passou a preencher `RunHandle.exit_code` (campo do ticket 05) com `runner::exit_code`, para o código de saída 0/1/2 valer também no modo Navegador.
+- O player do .exe exportado (`export::run_player`) agora, quando o script tem `cdp`, chama `cdp::spawn` direto em vez de esperar a janela-alvo (no CDP o próprio UltraTask abre o app).
+- Verificado no container: `cargo test --target x86_64-pc-windows-gnu` com 143 ok, 8 ignorados.
+- Pendente no Windows: exportar um script com `cdp` (ex.: "Busca no navegador" da skill), abrir o .exe e conferir que o app abre, a macro roda e o processo sai com 0.

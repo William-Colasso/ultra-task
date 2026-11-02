@@ -25,4 +25,4 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 | [15-captura-wgc](issues/15-captura-wgc.md) | needs-local-verification | b873562, 8efcc8e, 951c509 | Pixel/OCR no Chrome e jogo DirectX cobertos; coberta ≈ visível (teste ignorado) |
 | [16-blocos-uia](issues/16-blocos-uia.md) | needs-local-verification | e19e993, b293069, 303b138 | 3 alvos cobertos (WinForms/Notepad, WPF, Electron) com UIA real; erro/clique de reserva reais; `real_uia_on_own_window` |
 | [17-gravacao-com-uia](issues/17-gravacao-com-uia.md) | needs-local-verification | 9d698e2, bf089d8, 303b138 | Gravar em WinForms/WPF, explodir e tocar com a janela coberta |
-| [18-modo-cdp](issues/18-modo-cdp.md) | ready-for-agent | | |
+| [18-modo-cdp](issues/18-modo-cdp.md) | needs-local-verification | 0104381, 753855b, 2bf4b68 | 3 instâncias sobrepostas sem mudar cursor/janela ativa; pixel com janela coberta; porta 127.0.0.1 e perfil descartável no Windows; .exe exportado com `cdp` |

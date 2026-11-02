@@ -29,7 +29,8 @@ Um script do UltraTask é um arquivo JSON. Ele descreve a janela-alvo e uma árv
 ## Modos
 
 - `"Background"`: envia mensagens direto para a janela. O cursor real não se mexe e vários scripts rodam em paralelo. Serve para apps desktop clássicos (Win32, WinForms, WPF, Bloco de Notas, ERPs).
-- `"Focus"`: traz a janela para frente e usa o mouse/teclado reais (`SendInput` por scancode). Roda um script por vez. Serve para jogos, Chrome/Edge, apps Electron e qualquer app que ignore o modo Background. Combinações como Ctrl+S são confiáveis só neste modo.
+- `"Focus"`: traz a janela para frente e usa o mouse/teclado reais (`SendInput` por scancode). Roda um script por vez. Serve para jogos e qualquer app que ignore o modo Background. Combinações como Ctrl+S são confiáveis neste modo e no CDP.
+- **Navegador (CDP)**: preencha o campo `cdp` (veja *Modo Navegador (CDP)*); `mode` e `simulate_focus` passam a ser ignorados. O UltraTask abre o app e controla a página pelo Chrome DevTools Protocol, sem mexer no mouse/teclado reais, com a janela coberta e com várias instâncias em paralelo. Prefira este modo para Chrome, Edge, apps Electron e apps WebView2.
 
 Em qualquer modo, o bloco `Uia` (veja *Elementos (UIA)*) age direto num controle, sem mouse nem teclado. Ele roda em paralelo e com a janela coberta, inclusive em apps que ignoram o Background (Chromium 126+, Electron com acessibilidade, WPF, WinForms, UWP, Qt, egui). Prefira `Uia` a `Click` quando o controle tiver nome ou AutomationId.
 
@@ -69,6 +70,7 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
 | `trace` | registra cada bloco no log (debug) | `false` |
 | `human_mouse` | movimento humano do mouse: `Move`, `Click` e `Scroll` levam o ponteiro da posição atual até o alvo por uma curva com aceleração, freada e às vezes uma correção, em vez de saltar. O clique cai no ponto do bloco (± `jitter_px`). Vale nos dois modos; `Recording` não muda. Use `true` quando o app ou jogo estranha cursor que se teletransporta ou quando um arrasto (`Down` → `Move` → `Up`) precisa de movimentos intermediários | `false` |
 | `integrations` | chamadas REST em paralelo ao fluxo (veja *Integrações*) | `[]` |
+| `cdp` | liga o modo Navegador (CDP); veja abaixo. Omita nos outros modos | ausente |
 
 Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo Foco.
 
@@ -85,6 +87,26 @@ Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo
   ]
 }
 ```
+
+### Modo Navegador (CDP)
+
+```json
+"cdp": { "exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "args": "https://exemplo.com", "port": 0, "webview2": false, "keep_open": false }
+```
+
+| Campo | Significado | Padrão |
+|---|---|---|
+| `exe` | o programa que o UltraTask abre (`chrome.exe`, `msedge.exe`, o exe do app Electron ou WebView2). No JSON, `\\` em cada barra. `""` = conectar a um app já aberto com `--remote-debugging-port` na `port` | `""` |
+| `args` | resto da linha de comando (ex.: a URL); argumentos com espaço vão entre `\"...\"` | `""` |
+| `port` | `0` = porta livre a cada execução (permite várias instâncias). Obrigatória quando `exe` é `""` | `0` |
+| `webview2` | o app embute WebView2: a porta vai por `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | `false` |
+| `keep_open` | não fecha o app no fim (o perfil temporário fica no disco) | `false` |
+
+- A página é escolhida pelo `target.title`, comparado com o título da **página** (`document.title`), não com o da janela. No Chrome, use `"*Parte do título*"` em vez de `"Título - Google Chrome"`. `target` pode ser `null`: usa a primeira página.
+- Coordenadas continuam na área cliente da janela, como nos outros modos.
+- Com `exe` preenchido, `trigger` precisa ser `"Manual"`: cada execução abre o app de novo.
+- `Type` usa `Input.insertText`; `Key` aceita combinações (Ctrl `Down`, S `Press`, Ctrl `Up` = Ctrl+S). `Pixel`, `OcrContains` e `OcrToVar` usam a captura da página.
+- `human_mouse` e `integrations` valem também aqui: o trajeto humano vira uma sequência de eventos de mouse dentro da página. Blocos e condições `Uia` **não** funcionam neste modo: o bloco para com erro e a condição dá falso.
 
 ### Blocos
 
@@ -282,6 +304,28 @@ Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
 | Num0–Num9 | 96–105 |
 
 Para outras teclas, use o código *Virtual-Key* do Windows.
+
+## Exemplo no modo Navegador (CDP)
+
+Abre o Chrome numa página de busca, digita, salva com Ctrl+S e espera um pixel verde de confirmação:
+
+```json
+{
+  "name": "Busca no navegador",
+  "target": { "exe": "chrome.exe", "title": "*Exemplo*" },
+  "cdp": { "exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "args": "https://exemplo.com", "port": 0, "webview2": false, "keep_open": false },
+  "blocks": [
+    { "Click": { "x": "400", "y": "180", "button": "Left", "kind": "Click", "jitter_px": 0 } },
+    { "Type": { "text": "relatório {rand(1, 9)}" } },
+    { "Key": { "vk": 17, "action": "Down" } },
+    { "Key": { "vk": 83, "action": "Press" } },
+    { "Key": { "vk": 17, "action": "Up" } },
+    { "WaitUntil": {
+        "cond": { "kind": { "Pixel": { "x": "40", "y": "160", "color": [30, 160, 60], "tol": 20 } }, "negate": false },
+        "timeout_ms": "10000", "on_timeout": "Stop" } }
+  ]
+}
+```
 
 ## Exemplo com UI Automation
 

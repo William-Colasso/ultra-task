@@ -8,9 +8,11 @@ eframe = { version = "0.37.0", default-features = false, features = ["default_fo
 egui = { version = "0.37.0", default-features = false, features = ["monochrome_emoji_fonts"] }
 evalexpr = "13.1.0"
 fastrand = "2.5.0"
+png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tray-icon = "0.26.1"
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 # Só o backend DX12: renderização por software (WARP) quando o OpenGL não abre (VM/RDP sem GPU).
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12", "std", "wgsl"] }
 windows = { version = "0.62.2", features = [

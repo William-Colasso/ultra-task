@@ -318,6 +318,9 @@ impl App {
     }
 
     fn start_with_target(&mut self, i: usize, purpose: Purpose, ctx: &egui::Context) {
+        if purpose == Purpose::Play && self.scripts[i].cdp.is_some() {
+            return self.play_cdp(i, 0);
+        }
         let Some(rule) = self.scripts[i].target.clone() else {
             self.say(format!("'{}': defina a janela-alvo na aba Config", self.scripts[i].name));
             self.show(ctx);
@@ -354,6 +357,9 @@ impl App {
     }
 
     fn play_on(&mut self, i: usize, w: WinInfo, delay_ms: u64) {
+        if self.scripts[i].cdp.is_some() {
+            return self.play_cdp(i, delay_ms);
+        }
         if !win::self_elevated() && win::is_elevated_pid(w.pid) {
             self.elevated_target = true;
             self.say(format!("'{}' roda como administrador: o Windows bloqueia input vindo do UltraTask", w.title));
@@ -366,6 +372,26 @@ impl App {
             return;
         }
         let h = runner::spawn(s, self.scripts.clone(), w, &self.settings, delay_ms, self.log_tx.clone(), self.wake.clone());
+        self.push_run(h);
+    }
+
+    /// "Navegador (CDP)": UltraTask opens the app itself, so no window is needed up front.
+    fn play_cdp(&mut self, i: usize, delay_ms: u64) {
+        self.save_dirty();
+        let s = self.scripts[i].clone();
+        if s.blocks.is_empty() {
+            self.say(format!("'{}' não tem blocos", s.name));
+            return;
+        }
+        if let Some(e) = s.cdp.as_ref().and_then(|c| crate::cdp::validate(c, s.trigger).into_iter().next()) {
+            self.say(format!("'{}': {e}", s.name));
+            return;
+        }
+        let h = crate::cdp::spawn(s, self.scripts.clone(), &self.settings, delay_ms, self.log_tx.clone(), self.wake.clone());
+        self.push_run(h);
+    }
+
+    fn push_run(&mut self, h: RunHandle) {
         self.runs.push(h);
         // Keep finished runs around for inspecting their variables, but not forever.
         while self.runs.len() > 30 {
@@ -792,9 +818,17 @@ impl App {
 
             ui.label("Modo");
             ui.vertical(|ui| {
-                ui.radio_value(&mut s.mode, Mode::Background, "Segundo plano — não usa seu mouse/teclado (apps desktop)");
-                ui.radio_value(&mut s.mode, Mode::Focus, "Foco — traz a janela para frente e usa o mouse/teclado reais (jogos)");
+                let cdp = s.cdp.is_some();
+                for (m, label) in [(Mode::Background, "Segundo plano — não usa seu mouse/teclado (apps desktop)"), (Mode::Focus, "Foco — traz a janela para frente e usa o mouse/teclado reais (jogos)")] {
+                    if ui.radio(!cdp && s.mode == m, label).clicked() {
+                        (s.mode, s.cdp) = (m, None);
+                    }
+                }
+                if ui.radio(cdp, crate::cdp::ui::MODE_LABEL).clicked() && !cdp {
+                    s.cdp = Some(Default::default());
+                }
                 match s.mode {
+                    _ if s.cdp.is_some() => crate::cdp::ui::config_ui(ui, s.cdp.as_mut().unwrap(), s.trigger),
                     Mode::Background => {
                         ui.checkbox(&mut s.simulate_focus, "Simular foco (para apps/jogos que ignoram input quando inativos)");
                         ui.weak("Atalhos com Ctrl/Alt/Shift podem falhar em segundo plano; use o modo Foco nesses casos.");
@@ -1395,8 +1429,13 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
         let src = [
-            include_str!("catalog.rs"),
             include_str!("bgkeys.rs"),
+            include_str!("catalog.rs"),
+            include_str!("cdp/client.rs"),
+            include_str!("cdp/input.rs"),
+            include_str!("cdp/launch.rs"),
+            include_str!("cdp/mod.rs"),
+            include_str!("cdp/ui.rs"),
             include_str!("cola.rs"),
             include_str!("compat.rs"),
             include_str!("editor.rs"),

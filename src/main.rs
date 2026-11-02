@@ -2,6 +2,7 @@
 
 mod bgkeys;
 mod catalog;
+mod cdp;
 mod cola;
 mod compat;
 mod editor;

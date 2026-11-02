@@ -269,6 +269,24 @@ impl Block {
     }
 }
 
+/// "Navegador (CDP)" mode: UltraTask opens a Chromium/Electron/WebView2 app with remote
+/// debugging and drives it through the Chrome DevTools Protocol (see `cdp`).
+#[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct CdpLaunch {
+    /// App to open (chrome.exe, an Electron app, a WebView2 app). Empty = attach to an app
+    /// that is already listening on `port`.
+    pub exe: String,
+    /// Extra command-line arguments; quote ("...") the ones with spaces.
+    pub args: String,
+    /// 0 = a free port per run, so several instances run side by side.
+    pub port: u16,
+    /// WebView2 host app: flags go through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS.
+    pub webview2: bool,
+    /// Leave the app (and its temporary profile) open when the script ends.
+    pub keep_open: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Script {
@@ -285,6 +303,9 @@ pub struct Script {
     pub trace: bool,
     /// Mover/Clique/Rolar levam o ponteiro por um trajeto humano em vez de teletransportar.
     pub human_mouse: bool,
+    /// Set = "Navegador (CDP)" mode (`mode` and `simulate_focus` are ignored).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cdp: Option<CdpLaunch>,
     pub blocks: Vec<Block>,
     /// Aba Integrações: rodam em paralelo ao fluxo (veja `integrations`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -305,6 +326,7 @@ impl Default for Script {
             trigger: Trigger::Manual,
             trace: false,
             human_mouse: false,
+            cdp: None,
             blocks: vec![],
             integrations: vec![],
         }
@@ -493,6 +515,9 @@ pub fn validate(s: &Script, known: &[String]) -> Vec<String> {
     }
     if s.trigger != Trigger::Manual && s.target.is_none() {
         errs.push("trigger: gatilhos precisam de um target".into());
+    }
+    if let Some(c) = &s.cdp {
+        errs.extend(crate::cdp::validate(c, s.trigger));
     }
     validate_blocks(&s.blocks, "blocks", known, &mut errs);
     crate::integrations::validate(&s.integrations, &mut errs);
