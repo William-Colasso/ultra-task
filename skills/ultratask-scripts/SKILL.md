@@ -49,6 +49,7 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
   "client_size": [800, 600],
   "trigger": { "OnWindowOpen": { "delay_s": 3.0 } },
   "trace": false,
+  "human_mouse": false,
   "blocks": []
 }
 ```
@@ -57,12 +58,29 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
 |---|---|---|
 | `target` | `exe` compara sem diferenciar maiúsculas. `title` é um glob (`*` e `?`). `null` para sub-rotinas chamadas com `Call`: elas usam a janela de quem chamou | `null` |
 | `simulate_focus` | só no Background: finge que a janela está ativa (alguns apps e jogos exigem isso) | `false` |
-| `speed` | multiplica a velocidade dos blocos `Recording` | `1.0` |
+| `speed` | multiplica a velocidade dos blocos `Recording` e dos trajetos do `human_mouse` | `1.0` |
 | `repeat` | quantas vezes rodar `blocks`; `0` = infinito | `1` |
 | `hotkey` | atalho global; os 5 campos são obrigatórios; `vk` segue a tabela de *Teclas* | `null` |
 | `client_size` | `[w, h]` da área cliente em que as coordenadas foram medidas. Antes de tocar, o app redimensiona a janela para esse tamanho. Use `null` quando não souber | `null` |
 | `trigger` | `"Manual"`, `{"OnStartup":{"delay_s":N}}` (uma vez quando o UltraTask abre e a janela existe) ou `{"OnWindowOpen":{"delay_s":N}}` (a cada nova janela-alvo). Gatilhos exigem `target` | `"Manual"` |
 | `trace` | registra cada bloco no log (debug) | `false` |
+| `human_mouse` | movimento humano do mouse: `Move`, `Click` e `Scroll` levam o ponteiro da posição atual até o alvo por uma curva com aceleração, freada e às vezes uma correção, em vez de saltar. O clique cai no ponto do bloco (± `jitter_px`). Vale nos dois modos; `Recording` não muda. Use `true` quando o app ou jogo estranha cursor que se teletransporta ou quando um arrasto (`Down` → `Move` → `Up`) precisa de movimentos intermediários | `false` |
+
+Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo Foco.
+
+```json
+{
+  "name": "Traço no Paint",
+  "target": { "exe": "mspaint.exe", "title": "*Paint*" },
+  "mode": "Focus",
+  "human_mouse": true,
+  "blocks": [
+    { "Click": { "x": "200", "y": "300", "button": "Left", "kind": "Down", "jitter_px": 0 } },
+    { "Move": { "x": "700", "y": "450" } },
+    { "Click": { "x": "700", "y": "450", "button": "Left", "kind": "Up", "jitter_px": 0 } }
+  ]
+}
+```
 
 ### Blocos
 
