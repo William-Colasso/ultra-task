@@ -105,6 +105,8 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 - `Call` roda outro script da mesma pasta, pelo `name` dele, com a mesma janela e as mesmas variáveis.
 - `Breakpoint` pausa até o usuário clicar ▶ no painel de execuções, onde ele vê as variáveis. `Stop` encerra o script.
 - `Recording` é uma gravação feita pelo app. Copie-a de scripts existentes em vez de escrever à mão: `{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}}, …],"speed":1.0}}`.
+  - O campo opcional `elements` guarda o elemento UIA de cada clique gravado: `"elements":[{"event":1,"elem":ELEM,"action":"Invoke"}]`. `event` é o índice, em `events`, do botão pressionado (`{"Button":["Left",true,x,y]}`); `action` (`"Invoke"`, `"Toggle"` ou `"Select"`) só aparece quando o elemento pode ser acionado sem mouse. Gravações sem `elements` continuam válidas.
+  - A reprodução da gravação ignora `elements`. Ele só serve ao **Explodir em passos** do app: cliques esquerdos simples com `action` viram blocos `Uia` com `"fallback_click": true` (clique no mesmo ponto se o elemento sumir); os demais continuam `Click`. Não edite `elements` à mão.
 
 ### Condições (`COND`)
 

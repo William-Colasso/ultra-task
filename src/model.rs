@@ -158,7 +158,13 @@ impl Default for Condition {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum Block {
-    Recording { events: Vec<Event>, speed: f32 },
+    Recording {
+        events: Vec<Event>,
+        speed: f32,
+        /// UIA element of each recorded click (indices into `events`); used by "Explodir".
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        elements: Vec<crate::uia_rec::RecElem>,
+    },
     Move { x: String, y: String },
     Click { x: String, y: String, button: Btn, kind: ClickKind, jitter_px: u32 },
     Key { vk: u16, action: KeyAction },
@@ -217,7 +223,7 @@ impl Block {
     /// One line describing what the block does, for the debug panel and trace log.
     pub fn summary(&self) -> String {
         match self {
-            Block::Recording { events, speed } => format!("Reproduzir gravação ({} eventos, {speed}×)", events.len()),
+            Block::Recording { events, speed, .. } => format!("Reproduzir gravação ({} eventos, {speed}×)", events.len()),
             Block::Move { x, y } => format!("Mover para ({x}, {y})"),
             Block::Click { x, y, button, kind, .. } => format!("Clique {kind:?} {button:?} em ({x}, {y})"),
             Block::Key { vk, action } => format!("Tecla {} {action:?}", key_name(*vk)),
@@ -519,6 +525,13 @@ fn validate_blocks(blocks: &[Block], path: &str, known: &[String], errs: &mut Ve
         let f = |field: &str| format!("{p}.{field}");
         match b {
             Block::Recording { speed, .. } if !(*speed > 0.0) => errs.push(format!("{}: deve ser > 0", f("speed"))),
+            Block::Recording { events, elements, .. } => {
+                for (j, r) in elements.iter().enumerate() {
+                    if !events.get(r.event as usize).is_some_and(|e| matches!(e.ev, Ev::Button(_, true, _, _))) {
+                        errs.push(format!("{}: o evento {} não é um botão pressionado", f(&format!("elements[{j}].event")), r.event));
+                    }
+                }
+            }
             Block::Move { x, y } | Block::Click { x, y, .. } | Block::Scroll { x, y, .. } => {
                 check_expr(errs, &f("x"), x);
                 check_expr(errs, &f("y"), y);
@@ -674,7 +687,7 @@ mod tests {
         let s = Script {
             name: "t".into(),
             blocks: vec![
-                Block::Recording { events: vec![Event { t: 5, ev: Ev::Key(65, 30, false, true) }], speed: 1.0 },
+                Block::Recording { events: vec![Event { t: 5, ev: Ev::Key(65, 30, false, true) }], speed: 1.0, elements: vec![] },
                 Block::If { cond: Condition::default(), then: Block::templates(), else_: vec![Block::Stop] },
             ],
             ..Default::default()
@@ -721,6 +734,23 @@ mod tests {
         let s: Script = serde_json::from_str(r#"{"name":"x","blocks":["Stop",{"Wait":{"ms":"1","jitter_ms":0}}]}"#).unwrap();
         assert_eq!(s.blocks.len(), 2);
         assert_eq!(s.speed, 1.0); // missing fields take defaults
+    }
+
+    /// Ticket 17: a recording saved before `elements` existed parses, validates and is
+    /// written back byte for byte.
+    #[test]
+    fn old_recordings_unchanged() {
+        let old = r#"{"name":"velho","target":null,"mode":"Background","simulate_focus":false,"speed":1.0,"repeat":1,"hotkey":null,"client_size":[800,600],"trigger":"Manual","trace":false,"blocks":[{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}},{"t":90,"ev":{"Button":["Left",true,10,20]}},{"t":150,"ev":{"Button":["Left",false,10,20]}}],"speed":1.0}}]}"#;
+        let s: Script = serde_json::from_str(old).unwrap();
+        assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.is_empty()));
+        assert_eq!(validate(&s, &[]), Vec::<String>::new());
+        assert_eq!(serde_json::to_string(&s).unwrap(), old);
+        let new = old.replace(r#""speed":1.0}}]"#, r#""speed":1.0,"elements":[{"event":1,"elem":{"name":"OK","control_type":"Button","x":10,"y":20},"action":"Invoke"}]}}]"#);
+        let s: Script = serde_json::from_str(&new).unwrap();
+        assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.len() == 1));
+        assert_eq!(validate(&s, &[]), Vec::<String>::new());
+        let s: Script = serde_json::from_str(&new.replace(r#""event":1"#, r#""event":0"#)).unwrap();
+        assert_eq!(validate(&s, &[]), ["blocks[0].elements[0].event: o evento 0 não é um botão pressionado"]);
     }
 
     #[test]

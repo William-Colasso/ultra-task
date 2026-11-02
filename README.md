@@ -37,6 +37,7 @@ O bloco **Elemento (UIA)** age direto num controle da janela-alvo pela UI Automa
 - A condição **elemento (UIA)** testa se ele existe, se o nome ou o valor contém um texto, e se está marcado.
 - As chamadas UIA rodam numa thread própria, com timeout de 3 s por chamada. Um app que trava no "acionar" (uma janela modal, por exemplo) gera só um aviso.
 - Apps elevados exigem o UltraTask elevado.
+- Ao gravar, cada clique também guarda o elemento UIA sob o cursor (campo `elements` da gravação). Ele é lido numa thread à parte, então a gravação não fica mais lenta. **Explodir em passos** transforma os cliques em botões, caixas e itens (Invoke, Toggle, Select) em blocos **Elemento (UIA)** com o clique no mesmo ponto como reserva; os outros cliques continuam como **Clique**. A reprodução da gravação bruta não muda.
 
 ### Expressões
 Os campos numéricos e as condições aceitam expressões ([evalexpr](https://docs.rs/evalexpr)).

@@ -4,6 +4,7 @@ mod hooks;
 mod model;
 mod runner;
 mod uia;
+mod uia_rec;
 mod ui;
 mod win;
 

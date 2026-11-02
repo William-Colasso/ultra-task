@@ -369,7 +369,7 @@ impl App {
         }
     }
 
-    fn finish_record(&mut self, events: Vec<Event>, ctx: &egui::Context) {
+    fn finish_record(&mut self, events: Vec<Event>, elements: Vec<crate::uia_rec::RecElem>, ctx: &egui::Context) {
         let Some((i, h)) = self.recording.take() else { return };
         self.show(ctx);
         if events.is_empty() || i >= self.scripts.len() {
@@ -383,7 +383,7 @@ impl App {
         }
         let s = &mut self.scripts[i];
         s.client_size = win::client_size(h);
-        s.blocks.push(Block::Recording { events, speed: 1.0 });
+        s.blocks.push(Block::Recording { events, speed: 1.0, elements });
         self.dirty = true;
         self.save_dirty();
     }
@@ -950,7 +950,7 @@ impl eframe::App for App {
                 },
                 Out::Hotkey(hooks::PANIC_HOTKEY) => self.panic(),
                 Out::Hotkey(id) => self.toggle_play((id - hooks::SCRIPT_HOTKEY) as usize, ctx),
-                Out::Recorded(ev) => self.finish_record(ev, ctx),
+                Out::Recorded(ev, els) => self.finish_record(ev, els, ctx),
                 Out::Picked { x, y, root } => self.on_pick(x, y, root, ctx),
                 Out::Error(e) => self.say(e),
             }
@@ -1104,8 +1104,8 @@ fn blocks_ui(ui: &mut Ui, blocks: &mut Vec<Block>, id: Id, ec: &mut EditCtx) {
             blocks.remove(i);
         }
         Some((i, Act::Explode)) => {
-            if let Block::Recording { events, .. } = &blocks[i] {
-                let new = runner::explode(events);
+            if let Block::Recording { events, elements, .. } = &blocks[i] {
+                let new = crate::uia_rec::upgrade_clicks(runner::explode(events), events, elements);
                 blocks.splice(i..=i, new);
             }
         }
@@ -1196,11 +1196,15 @@ const BTNS: &[(Btn, &str)] = &[(Btn::Left, "esquerdo"), (Btn::Right, "direito"),
 /// Returns true when "Explodir" was clicked on a recording block.
 fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
     match b {
-        Block::Recording { events, speed } => {
+        Block::Recording { events, speed, elements } => {
             let secs = events.last().map_or(0, |e| e.t) as f32 / 1000.0;
             ui.label(format!("{} eventos, {secs:.1}s", events.len()));
+            let uia = elements.iter().filter(|r| r.action.is_some()).count();
+            if uia > 0 {
+                ui.weak(format!("{uia} cliques viram Elemento (UIA) ao explodir"));
+            }
             ui.add(DragValue::new(speed).range(0.1..=10.0).speed(0.05).prefix("velocidade ").suffix("×"));
-            return ui.button("Explodir em passos").on_hover_text("Converte em Clique/Tecla/Esperar editáveis (descarta movimentos soltos)").clicked();
+            return ui.button("Explodir em passos").on_hover_text("Converte em Clique/Tecla/Esperar editáveis (descarta movimentos soltos); cliques em botões, caixas e itens viram Elemento (UIA), com o clique como reserva").clicked();
         }
         Block::Move { x, y } => {
             xy_ui(ui, x, y, id, ec);
@@ -1409,7 +1413,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("uia.rs"), include_str!("runner/uia_block.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("uia.rs"), include_str!("runner/uia_block.rs"), include_str!("uia_rec.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
