@@ -21,8 +21,8 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 | [11-integracao-sqlite](issues/11-integracao-sqlite.md) | ready-for-agent | | |
 | [12-integracao-odbc](issues/12-integracao-odbc.md) | ready-for-agent | | |
 | [13-integracao-comando-e-clipboard](issues/13-integracao-comando-e-clipboard.md) | ready-for-agent | | |
-| [14-segundo-plano-modificadores](issues/14-segundo-plano-modificadores.md) | ready-for-agent | | |
-| [15-captura-wgc](issues/15-captura-wgc.md) | ready-for-agent | | |
+| [14-segundo-plano-modificadores](issues/14-segundo-plano-modificadores.md) | needs-local-verification | 029b940, 6a669f9, 951c509 | Ctrl+S 20/20 no Notepad coberto; Ctrl real nunca pressionado; alvo travado; E2E antigo |
+| [15-captura-wgc](issues/15-captura-wgc.md) | needs-local-verification | b873562, 8efcc8e, 951c509 | Pixel/OCR no Chrome e jogo DirectX cobertos; coberta ≈ visível (teste ignorado) |
 | [16-blocos-uia](issues/16-blocos-uia.md) | needs-local-verification | e19e993, b293069, 303b138 | 3 alvos cobertos (WinForms/Notepad, WPF, Electron) com UIA real; erro/clique de reserva reais; `real_uia_on_own_window` |
 | [17-gravacao-com-uia](issues/17-gravacao-com-uia.md) | needs-local-verification | 9d698e2, bf089d8, 303b138 | Gravar em WinForms/WPF, explodir e tocar com a janela coberta |
 | [18-modo-cdp](issues/18-modo-cdp.md) | ready-for-agent | | |
