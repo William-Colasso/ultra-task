@@ -3,6 +3,7 @@
 //! A UI (`cola.rs`, `manual.rs`) só chama o que está aqui.
 
 use crate::model::{self, Block, Script};
+use crate::uia::UiaAction;
 
 /// Uma função que pode ser usada nas expressões.
 pub struct FnDoc {
@@ -199,6 +200,7 @@ pub fn apply(text: &str, word_start: usize, cursor: usize, insert: &str) -> (Str
 fn block_vars(b: &Block) -> Vec<&str> {
     match b {
         Block::SetVar { name, .. } | Block::OcrToVar { name, .. } => vec![name.as_str()],
+        Block::Uia { action: UiaAction::ReadValue(name) | UiaAction::ReadName(name), .. } => vec![name.as_str()],
         // Ticket 09 (integrações): as variáveis de resultado dos blocos de integração entram aqui.
         _ => vec![],
     }
@@ -353,6 +355,13 @@ mod tests {
         };
         let all = vec![main.clone(), sub];
         assert_eq!(script_vars(&main, &all), ["a", "b", "do_sub", "lido"]);
+    }
+
+    #[test]
+    fn uia_read_vars_are_listed() {
+        let uia = |action| Block::Uia { elem: Default::default(), action, timeout_ms: "1".into(), fallback_click: false };
+        let sc = Script { blocks: vec![uia(UiaAction::ReadValue("valor".into())), uia(UiaAction::ReadName("nome".into())), uia(UiaAction::Invoke)], ..Default::default() };
+        assert_eq!(script_vars(&sc, &[]), ["nome", "valor"]);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! Nothing here touches egui, so every operation is unit-tested.
 
 use crate::model::Block;
+use crate::uia::UiaAction;
 
 /// A child list of a container block.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -211,6 +212,8 @@ pub fn category(b: &Block) -> Category {
         Block::Wait { .. } | Block::WaitUntil { .. } => Category::Wait,
         Block::If { .. } | Block::Repeat { .. } | Block::While { .. } | Block::Call { .. } | Block::Stop => Category::Control,
         Block::SetVar { .. } | Block::OcrToVar { .. } => Category::Vars,
+        // Reading a value or name into a variable is a "variáveis" block; acting is an "ação".
+        Block::Uia { action: UiaAction::ReadValue(_) | UiaAction::ReadName(_), .. } => Category::Vars,
         Block::Log { .. } | Block::Breakpoint => Category::Debug,
         // Recording, Move, Click, Key, Type, Scroll, and blocks added later default to "ação".
         _ => Category::Action,
@@ -398,7 +401,7 @@ mod tests {
         for t in Block::templates() {
             let c = category(&t);
             let want = match t.title() {
-                "Clique" | "Mover" | "Tecla" | "Digitar" | "Rolar" | "Reproduzir gravação" => Category::Action,
+                "Clique" | "Mover" | "Tecla" | "Digitar" | "Rolar" | "Reproduzir gravação" | "Elemento (UIA)" => Category::Action,
                 "Esperar" | "Esperar até" => Category::Wait,
                 "Se" | "Repetir" | "Enquanto" | "Chamar script" | "Parar" => Category::Control,
                 "Definir variável" | "Ler texto (OCR)" => Category::Vars,
@@ -406,6 +409,8 @@ mod tests {
             };
             assert_eq!(c, want, "{}", t.title());
         }
+        let read = Block::Uia { elem: Default::default(), action: UiaAction::ReadValue("v".into()), timeout_ms: "1".into(), fallback_click: false };
+        assert_eq!(category(&read), Category::Vars);
     }
 
     #[test]

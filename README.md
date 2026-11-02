@@ -32,6 +32,16 @@ O resultado é um único `target/release/ultratask.exe`. Os scripts ficam em `sc
 
 **Config → Mouse → Movimento humano do mouse** (`"human_mouse": true` no JSON): Mover, Clique, Rolar e arrastos levam o ponteiro por uma curva, acelerando e freando, com duração que cresce com a distância e às vezes passando um pouco do ponto e corrigindo. O clique cai exatamente no alvo (mais o ± px do bloco). No Segundo plano, a janela recebe os movimentos intermediários. A velocidade do script escala o trajeto; gravações tocam como foram gravadas.
 
+### Elementos (UI Automation)
+O bloco **Elemento (UIA)** age direto num controle da janela-alvo pela UI Automation do Windows, sem mouse nem teclado. Por isso roda em paralelo e com a janela coberta, inclusive em apps que ignoram o modo Segundo plano (Chromium 126+, Electron com acessibilidade ligada, WPF, WinForms, UWP, Qt e egui).
+- Capture o elemento com 📍: o clique grava AutomationId, Name, ControlType, ClassName e o ponto clicado. A identificação pode ser editada clicando nela.
+- Ações: acionar, alternar, definir valor (aceita `{expressão}`), selecionar, expandir, recolher, e ler o valor ou o nome para uma variável.
+- O bloco espera o elemento aparecer até o timeout. Sem achar, para com erro ou, com **se não achar, clicar no ponto**, clica no ponto capturado e avisa no log.
+- A condição **elemento (UIA)** testa se ele existe, se o nome ou o valor contém um texto, e se está marcado.
+- As chamadas UIA rodam numa thread própria, com timeout de 3 s por chamada. Um app que trava no "acionar" (uma janela modal, por exemplo) gera só um aviso.
+- Apps elevados exigem o UltraTask elevado.
+- Ao gravar, cada clique também guarda o elemento UIA sob o cursor (campo `elements` da gravação). Ele é lido numa thread à parte, então a gravação não fica mais lenta. **Explodir em passos** transforma os cliques em botões, caixas e itens (Invoke, Toggle, Select) em blocos **Elemento (UIA)** com o clique no mesmo ponto como reserva; os outros cliques continuam como **Clique**. A reprodução da gravação bruta não muda.
+
 ### Expressões
 Os campos numéricos e as condições aceitam expressões ([evalexpr](https://docs.rs/evalexpr)).
 - Exemplos: `contador + 1`, `x * 2`, `rand(100, 300)`, `contem(texto, "OK")`, `a > 3 && b == "fim"`.
@@ -85,6 +95,6 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 
 ## Testes
 ```bash
-cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local)
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
+cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local), UIA (árvore falsa)
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, UI Automation numa janela própria), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
 ```

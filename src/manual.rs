@@ -73,6 +73,7 @@ fn block_help(b: &Block) -> &'static str {
         Block::While { .. } => "repete o corpo enquanto a condição valer",
         Block::SetVar { .. } => "guarda o valor da expressão numa variável",
         Block::OcrToVar { .. } => "lê o texto de uma região da janela (OCR) e guarda numa variável",
+        Block::Uia { .. } => "age num controle pela UI Automation, sem mouse nem teclado: acionar, alternar, definir valor ({expressão}), selecionar, expandir, recolher ou ler o valor/nome para uma variável. Capture o elemento com 📍; espera ele aparecer até o timeout e, sem achar, para com erro ou clica no ponto capturado",
         Block::Call { .. } => "roda outro script, com a mesma janela e as mesmas variáveis",
         Block::Log { .. } => "escreve no log do app; {expressão} é trocado pelo valor",
         Block::Breakpoint => "pausa aqui; veja as variáveis no painel e clique ▶ para continuar",
@@ -101,6 +102,7 @@ pub fn entries(s: Section, settings: &Settings) -> Vec<Entry> {
             e("janela está em foco", "a janela-alvo é a janela ativa", None),
             e("título casa com", "o título bate com o padrão; * = qualquer trecho, ? = um caractere", Some("*Nível 3*")),
             e("expressão", "vale se a expressão der verdadeiro", Some("contador < 10 && contem(texto, \"OK\")")),
+            e("elemento (UIA)", "o elemento capturado com 📍 existe, o nome ou o valor contém o texto (sem diferenciar maiúsculas), ou a caixa está marcada; uma busca só, sem esperar (use em Esperar até para esperar)", None),
         ],
         Section::Teclas => all_keys().into_iter().map(|vk| e(key_name(vk), format!("vk {vk}"), None)).collect(),
         Section::Atalhos => vec![

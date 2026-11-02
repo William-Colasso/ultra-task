@@ -11,6 +11,8 @@ mod model;
 mod runner;
 mod tree;
 mod ui;
+mod uia;
+mod uia_rec;
 mod win;
 
 use std::sync::Arc;
