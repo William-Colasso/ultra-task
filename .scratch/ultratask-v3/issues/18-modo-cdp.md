@@ -121,6 +121,26 @@ Feito no container Linux (alvo `x86_64-pc-windows-gnu` + Wine), branch `worktree
 - **Gatilhos.** Com `cdp.exe`, só `Manual`. `OnWindowOpen` abriria o app em laço, porque cada execução cria uma janela nova. Sem `exe` (anexar), os gatilhos continuam valendo.
 - **Manual (`manual::block_help`).** Não existe neste branch (vem do ticket 03), e o CDP é um modo, não um bloco. No merge com o 03, vale acrescentar ao Manual uma seção sobre o modo.
 
+### Merge com `main-vqbyri`
+A base trouxe os tickets 01-04, 09 e 14-17, e o merge foi feito por `git merge`, sem rebase.
+
+- **Conflitos resolvidos mantendo os dois lados:**
+  - `src/main.rs`: os `mod`, em ordem alfabética;
+  - `src/model.rs`: `human_mouse` e `cdp` em `Script` e no `Default`;
+  - `src/ui.rs`: a lista do teste de glifos, com os arquivos de `src/cdp/` incluídos e a lista toda reordenada em ordem alfabética (`bgkeys` passou para antes de `catalog`);
+  - `README.md`: a seção de testes;
+  - `skills/ultratask-scripts/SKILL.md`: as linhas `human_mouse`/`integrations`/`cdp` na tabela do script, e os dois exemplos (CDP e UIA).
+- **Adaptações do `CdpIo` e do `cdp::spawn`:**
+  - `pointer`: começa da última posição enviada; antes do primeiro evento, do meio da página. Não há cursor real.
+  - `uia`: devolve erro claro (`UIA_UNAVAILABLE`, "UI Automation não funciona no modo Navegador (CDP); use Clique, Pixel ou OCR"). O bloco para com esse erro e a condição dá falso com aviso.
+  - O laço de `cdp::spawn` liga `human_mouse` e chama `start_integrations`/`finish_integrations`, como o `runner::spawn`. Os vários `Move` do trajeto humano viram `mouseMoved`.
+- **Manual:** seção nova **Modos** em `src/manual.rs` (Segundo plano, Foco, Navegador (CDP) e o risco da porta). O teste `sections_have_content` agora também exige o termo "Navegador (CDP)".
+- **Skill:** nota de que `human_mouse` e `integrations` valem no CDP, e `Uia` não.
+- **Verificação depois do merge:**
+  - `cargo test --target x86_64-pc-windows-gnu`: **129 passed, 0 failed, 8 ignored**, sem warnings (nem no `cargo build`);
+  - `cdp_real_browser` de novo contra 3 Chromium reais: `ok`. O teste agora roda com `human_mouse` ligado, confere no DOM mais de 4 `mousemove` e que o bloco UIA falha com `UIA_UNAVAILABLE`;
+  - todos os scripts completos da skill dão `OK` no `--validate` com `LC_ALL=C.UTF-8` e o nome do arquivo igual ao `name`: "Busca no navegador", "Consulta CEP", "Login diário", "Notas numeradas", "Pedido via UIA", "Traço no Paint" e o bloco `cdp`.
+
 ### Pendente no Windows
 Pré-requisitos: build MSVC do branch (`cargo build --release`), Chrome ou Edge instalado e um app Electron qualquer. Para o Electron, por exemplo: `npm create electron-app teste` (ou o VS Code com `--user-data-dir` próprio).
 

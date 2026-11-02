@@ -96,6 +96,8 @@ pub struct CdpIo {
     hwnd: Option<Hwnd>,
     input: InputState,
     geom: Geometry,
+    /// Client-area size of the window (or the viewport, in physical px, without a window).
+    client: (i32, i32),
     geom_at: Option<Instant>,
     start: Instant,
     ocr_scale: u32,
@@ -103,7 +105,7 @@ pub struct CdpIo {
 
 impl CdpIo {
     fn new(conn: Conn, pid: Option<u32>, rule: Option<TargetRule>, page_title: String, ocr_scale: u32) -> Self {
-        CdpIo { conn, pid, rule, page_title, hwnd: None, input: InputState::default(), geom: Geometry::default(), geom_at: None, start: Instant::now(), ocr_scale }
+        CdpIo { conn, pid, rule, page_title, hwnd: None, input: InputState::default(), geom: Geometry::default(), client: (0, 0), geom_at: None, start: Instant::now(), ocr_scale }
     }
 
     fn call(&mut self, method: &'static str, params: Value) -> Result<Value, Halt> {
@@ -119,7 +121,9 @@ impl CdpIo {
         }
         if let Ok(v) = self.conn.eval("[innerWidth, innerHeight, devicePixelRatio]") {
             let f = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            self.geom = Geometry::new(self.hwnd.and_then(win::client_size), (f(0), f(1)), f(2));
+            let client = self.hwnd.and_then(win::client_size);
+            self.geom = Geometry::new(client, (f(0), f(1)), f(2));
+            self.client = client.unwrap_or(((f(0) * self.geom.dpr) as i32, (f(1) * self.geom.dpr) as i32));
         }
         self.geom_at = Some(Instant::now());
         self.geom
@@ -186,7 +190,21 @@ impl Io for CdpIo {
     fn sleep(&mut self, ms: u64) {
         std::thread::sleep(Duration::from_millis(ms));
     }
+    /// Start of a human-mouse path: there is no real cursor, so the last point sent, or the
+    /// middle of the page before the first one.
+    fn pointer(&mut self, last_sent: Option<(i32, i32)>) -> (i32, i32) {
+        last_sent.unwrap_or_else(|| {
+            let g = self.geometry();
+            (g.off_x + (self.client.0 - g.off_x) / 2, g.off_y + (self.client.1 - g.off_y) / 2)
+        })
+    }
+    fn uia(&mut self, _q: &crate::uia::Query) -> Result<crate::uia::Reply, Halt> {
+        Err(UIA_UNAVAILABLE.into())
+    }
 }
+
+/// UI Automation needs the window's accessibility tree, which this mode doesn't use.
+pub const UIA_UNAVAILABLE: &str = "UI Automation não funciona no modo Navegador (CDP); use Clique, Pixel ou OCR";
 
 /// The app opened for one run (none when attaching to an app already open).
 struct Opened {
@@ -320,8 +338,10 @@ pub fn spawn(script: Script, all: Vec<Script>, settings: &Settings, delay_ms: u6
                     let r = {
                         let mut it = Interp::new(&mut io, &stop, &all, script.speed, &mut log_fn, &dbg);
                         it.trace = script.trace;
+                        it.human_mouse = script.human_mouse;
+                        it.start_integrations(&script.integrations);
                         let mut n = 0u32;
-                        loop {
+                        let r = loop {
                             n += 1;
                             set(&if script.repeat == 1 { "Rodando".to_string() } else { format!("Rodando (volta {n})") });
                             if let Err(h) = it.run_blocks(&script.blocks) {
@@ -330,7 +350,12 @@ pub fn spawn(script: Script, all: Vec<Script>, settings: &Settings, delay_ms: u6
                             if script.repeat != 0 && n >= script.repeat {
                                 break Ok(());
                             }
+                        };
+                        if script.integrations.iter().any(|i| i.when == crate::integrations::When::OnEnd) {
+                            set("Aguardando integrações (ao terminar)");
                         }
+                        it.finish_integrations();
+                        r
                     };
                     io.release_all();
                     (r, Some(io), o)
@@ -446,7 +471,8 @@ mod tests {
             .eval(
                 "document.body.innerHTML = '<input id=i style=\"position:fixed;left:0;top:0;width:300px;height:40px\"><div id=b style=\"position:fixed;left:0;top:100px;width:50px;height:50px;background:rgb(200,30,60)\"></div>'; \
                  window.log = []; addEventListener('keydown', e => { if (e.ctrlKey && e.key === 's') { e.preventDefault(); log.push('ctrl+s'); } }); \
-                 addEventListener('dblclick', e => log.push('dbl ' + e.clientX + ',' + e.clientY)); 1",
+                 addEventListener('dblclick', e => log.push('dbl ' + e.clientX + ',' + e.clientY)); \
+                 window.moves = 0; addEventListener('mousemove', () => moves++); 1",
             )
             .unwrap();
         let dpr = io.geometry().dpr;
@@ -470,7 +496,15 @@ mod tests {
         ];
         let (stop, dbg) = (AtomicBool::new(false), Debug::default());
         let mut logs = |m: String| eprintln!("{port}: {m}");
-        Interp::new(&mut io, &stop, &[], 1.0, &mut logs, &dbg).run_blocks(&blocks).unwrap();
+        {
+            // Human mouse on: the path's many Moves become mouseMoved and the clicks still land.
+            let mut it = Interp::new(&mut io, &stop, &[], 1.0, &mut logs, &dbg);
+            it.human_mouse = true;
+            it.run_blocks(&blocks).unwrap();
+            let uia = Block::Uia { elem: crate::uia::UiaElem { name: "x".into(), ..Default::default() }, action: crate::uia::UiaAction::Invoke, timeout_ms: "0".into(), fallback_click: false };
+            assert_eq!(it.run_blocks(&[uia]), Err(Halt::Error(UIA_UNAVAILABLE.into())));
+        }
+        assert!(io.conn.eval("moves").unwrap().as_u64().unwrap() > 4, "trajeto humano gera vários mouseMoved");
         assert_eq!(io.conn.eval("document.getElementById('i').value").unwrap(), json!(format!("olá {port} !")));
         assert_eq!(io.conn.eval("log").unwrap(), json!(["ctrl+s", "dbl 300,300"]));
         assert_eq!(io.pixel(1, 1).unwrap(), [255, 255, 255], "dentro do input");
