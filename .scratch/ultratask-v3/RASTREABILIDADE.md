@@ -16,7 +16,7 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 | [06-roda-em-qualquer-windows](issues/06-roda-em-qualquer-windows.md) | ready-for-agent | | |
 | [07-builds-32-bits-e-arm64](issues/07-builds-32-bits-e-arm64.md) | ready-for-agent | | |
 | [08-windows-7-e-8](issues/08-windows-7-e-8.md) | ready-for-agent | | |
-| [09-integracoes-rest](issues/09-integracoes-rest.md) | ready-for-agent | | |
+| [09-integracoes-rest](issues/09-integracoes-rest.md) | needs-local-verification | 905c4d8, 9fca086 | Aba Integrações (criar/editar/remover) e painel Execuções na tela; HTTPS real (`https_real_viacep`) |
 | [10-integracao-arquivo](issues/10-integracao-arquivo.md) | ready-for-agent | | |
 | [11-integracao-sqlite](issues/11-integracao-sqlite.md) | ready-for-agent | | |
 | [12-integracao-odbc](issues/12-integracao-odbc.md) | ready-for-agent | | |
