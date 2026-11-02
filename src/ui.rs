@@ -1,6 +1,7 @@
 use crate::hooks::{self, Cmd, Hooks, Out};
 use crate::model::{self, *};
 use crate::runner::{self, RunHandle};
+use crate::uia::{self, UiaAction, UiaElem, UiaTest};
 use crate::win::{self, Hwnd, WinInfo};
 use crate::{TrayMsg, make_tray};
 use eframe::egui::{self, Color32, ComboBox, DragValue, Id, RichText, Ui, ViewportCommand};
@@ -27,12 +28,14 @@ enum Pick {
     Target,
     Point(Id),
     Region(Id, Option<(i32, i32)>),
+    Uia(Id),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum PickData {
     Point(i32, i32, [u8; 3]),
     Region(Region),
+    Uia(Box<uia::Captured>),
 }
 
 pub struct App {
@@ -51,6 +54,8 @@ pub struct App {
     pick: Option<Pick>,
     pick_req: Option<Pick>,
     pick_result: Option<(Id, PickData)>,
+    /// 📍 on a UIA element: captured on a worker thread, never on this one.
+    uia_pick: Option<(Id, Receiver<Result<uia::Captured, String>>)>,
     chooser: Option<(usize, Purpose, Vec<WinInfo>)>,
     rename: Option<String>,
     confirm_delete: bool,
@@ -121,6 +126,7 @@ impl App {
             pick: None,
             pick_req: None,
             pick_result: None,
+            uia_pick: None,
             chooser: None,
             rename: None,
             confirm_delete: false,
@@ -393,6 +399,7 @@ impl App {
         self.say(match self.pick {
             Some(Pick::Region(..)) => "Clique no canto SUPERIOR ESQUERDO da região",
             Some(Pick::Target) => "Clique na janela-alvo",
+            Some(Pick::Uia(_)) => "Clique no elemento da janela-alvo",
             _ => "Clique no ponto da janela-alvo",
         });
     }
@@ -437,6 +444,10 @@ impl App {
             Pick::Region(id, Some((x0, y0))) => {
                 let r = Region { x: x0.min(cx), y: y0.min(cy), w: (cx - x0).abs(), h: (cy - y0).abs() };
                 self.pick_result = Some((id, PickData::Region(r)));
+            }
+            Pick::Uia(id) => {
+                self.uia_pick = Some((id, uia::capture_async(t.hwnd, x, y, cx, cy, self.wake.clone())));
+                self.say("Lendo o elemento pela UI Automation…");
             }
             Pick::Target => unreachable!(),
         }
@@ -947,6 +958,21 @@ impl eframe::App for App {
         while let Ok(l) = self.log_rx.try_recv() {
             self.say(l);
         }
+        let uia_got = self.uia_pick.as_ref().map(|(id, rx)| (*id, rx.try_recv()));
+        match uia_got {
+            Some((id, Ok(Ok(c)))) => {
+                self.uia_pick = None;
+                self.say(format!("Elemento: {}", uia::describe(&c.elem)));
+                self.pick_result = Some((id, PickData::Uia(Box::new(c))));
+                ctx.request_repaint();
+            }
+            Some((_, Ok(Err(e)))) => {
+                self.uia_pick = None;
+                self.say(format!("Não deu para ler o elemento: {e}"));
+            }
+            Some((_, Err(std::sync::mpsc::TryRecvError::Disconnected))) => self.uia_pick = None,
+            _ => {}
+        }
         while let Ok(m) = self.tray_rx.try_recv() {
             match m {
                 TrayMsg::Show => self.show(ctx),
@@ -996,11 +1022,8 @@ struct EditCtx<'a> {
 
 impl EditCtx<'_> {
     fn take(&mut self, id: Id) -> Option<PickData> {
-        match *self.pick_result {
-            Some((pid, d)) if pid == id => {
-                *self.pick_result = None;
-                Some(d)
-            }
+        match self.pick_result {
+            Some((pid, _)) if *pid == id => self.pick_result.take().map(|r| r.1),
             _ => None,
         }
     }
@@ -1222,6 +1245,16 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             ui.label("=");
             expr_edit(ui, expr, 240.0);
         }
+        Block::Uia { elem, action, timeout_ms, fallback_click } => {
+            if let Some(Some(suggested)) = uia_elem_ui(ui, elem, id, ec) {
+                *action = suggested;
+            }
+            uia_action_ui(ui, action, id.with("act"));
+            ui.label("esperar até");
+            expr_edit(ui, timeout_ms, 60.0);
+            ui.label("ms");
+            ui.checkbox(fallback_click, "se não achar, clicar no ponto").on_hover_text("Sem esta opção, o bloco para com erro quando o elemento não aparece");
+        }
         Block::OcrToVar { name, region } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
             ui.label("= texto da região");
@@ -1249,13 +1282,14 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
 
 fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
     ui.checkbox(&mut c.negate, "não");
-    let kinds: [(&str, fn() -> CondKind); 6] = [
+    let kinds: [(&str, fn() -> CondKind); 7] = [
         ("pixel tem a cor", || CondKind::Pixel { x: "0".into(), y: "0".into(), color: [255, 255, 255], tol: 10 }),
         ("texto (OCR) contém", || CondKind::OcrContains { region: Region { x: 0, y: 0, w: 200, h: 40 }, text: String::new() }),
         ("janela existe", || CondKind::WindowExists),
         ("janela está em foco", || CondKind::WindowForeground),
         ("título casa com", || CondKind::TitleMatches("*".into())),
         ("expressão", || CondKind::Expr("contador < 10".into())),
+        ("elemento (UIA)", || CondKind::Uia { elem: UiaElem::default(), test: UiaTest::Exists }),
     ];
     let same = |a: &CondKind, b: &CondKind| std::mem::discriminant(a) == std::mem::discriminant(b);
     let cur = kinds.iter().find(|k| same(&k.1(), &c.kind)).map_or("?", |k| k.0);
@@ -1283,6 +1317,85 @@ fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
         }
         CondKind::Expr(s) => expr_edit(ui, s, 240.0),
         CondKind::WindowExists | CondKind::WindowForeground => {}
+        CondKind::Uia { elem, test } => {
+            uia_elem_ui(ui, elem, id, ec);
+            let same = |a: &UiaTest, b: &UiaTest| std::mem::discriminant(a) == std::mem::discriminant(b);
+            ComboBox::from_id_salt(id.with("uiatest")).selected_text(test.label()).show_ui(ui, |ui| {
+                for t in UiaTest::all() {
+                    if ui.selectable_label(same(test, &t), t.label()).clicked() && !same(test, &t) {
+                        *test = t;
+                    }
+                }
+            });
+            if let UiaTest::NameContains(t) | UiaTest::ValueContains(t) = test {
+                ui.add(egui::TextEdit::singleline(t).desired_width(140.0).hint_text("texto"));
+            }
+        }
+    }
+}
+
+/// The element's identification (editable in a popup) and 📍 to capture it.
+/// Returns `Some(suggested action)` right after a capture.
+fn uia_elem_ui(ui: &mut Ui, e: &mut UiaElem, id: Id, ec: &mut EditCtx) -> Option<Option<UiaAction>> {
+    ui.menu_button(uia::describe(e), |ui| {
+        egui::Grid::new(id.with("uiagrid")).num_columns(2).show(ui, |ui| {
+            ui.label("AutomationId");
+            ui.add(egui::TextEdit::singleline(&mut e.automation_id).desired_width(200.0));
+            ui.end_row();
+            ui.label("Nome");
+            ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(200.0).hint_text("aceita * e ?"));
+            ui.end_row();
+            ui.label("ControlType");
+            ComboBox::from_id_salt(id.with("uiact")).selected_text(if e.control_type.is_empty() { "qualquer" } else { e.control_type.as_str() }).height(320.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut e.control_type, String::new(), "qualquer");
+                for ct in uia::CONTROL_TYPES {
+                    ui.selectable_value(&mut e.control_type, ct.to_string(), *ct);
+                }
+            });
+            ui.end_row();
+            ui.label("ClassName");
+            ui.add(egui::TextEdit::singleline(&mut e.class_name).desired_width(200.0));
+            ui.end_row();
+            ui.label("Ponto capturado");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut e.x).prefix("x "));
+                ui.add(DragValue::new(&mut e.y).prefix("y "));
+            });
+            ui.end_row();
+        });
+        if !e.ancestors.is_empty() {
+            ui.weak(format!("{} ancestrais gravados (desempatam elementos iguais)", e.ancestors.len()));
+        }
+    })
+    .response
+    .on_hover_text("Identificação do elemento; clique para editar");
+    if ui.small_button("📍").on_hover_text("Capturar o elemento clicando nele na janela-alvo").clicked() {
+        *ec.pick_req = Some(Pick::Uia(id));
+    }
+    if let Some(PickData::Uia(c)) = ec.take(id) {
+        *e = c.elem;
+        return Some(c.action);
+    }
+    None
+}
+
+fn uia_action_ui(ui: &mut Ui, a: &mut UiaAction, id: Id) {
+    let same = |x: &UiaAction, y: &UiaAction| std::mem::discriminant(x) == std::mem::discriminant(y);
+    ComboBox::from_id_salt(id).selected_text(a.label()).show_ui(ui, |ui| {
+        for o in UiaAction::all() {
+            if ui.selectable_label(same(a, &o), o.label()).clicked() && !same(a, &o) {
+                *a = o;
+            }
+        }
+    });
+    match a {
+        UiaAction::SetValue(t) => {
+            ui.add(egui::TextEdit::singleline(t).desired_width(200.0).hint_text("texto; aceita {variavel}"));
+        }
+        UiaAction::ReadValue(v) | UiaAction::ReadName(v) => {
+            ui.add(egui::TextEdit::singleline(v).desired_width(100.0).hint_text("variável"));
+        }
+        _ => {}
     }
 }
 
@@ -1296,7 +1409,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("uia.rs"), include_str!("runner/uia_block.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;

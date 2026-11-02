@@ -2,6 +2,7 @@
 //! is testable with a fake clock.
 use crate::hooks;
 use crate::model::*;
+use crate::uia;
 use crate::win::{self, Injector, WinInfo};
 use evalexpr::{ContextWithMutableFunctions, ContextWithMutableVariables, EvalexprResult, Function, HashMapContext, IterateVariablesContext, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,7 +40,14 @@ pub trait Io {
     fn window_title(&mut self) -> String;
     fn now_ms(&mut self) -> u64;
     fn sleep(&mut self, ms: u64);
+    /// One UI Automation lookup + operation on the target window (never waits for the
+    /// element to appear: the interpreter polls).
+    fn uia(&mut self, _q: &uia::Query) -> R<uia::Reply> {
+        Err("UI Automation indisponível".into())
+    }
 }
+
+mod uia_block;
 
 /// Live view of a run for the debug panel; shared between the run thread and the UI.
 #[derive(Default)]
@@ -290,6 +298,7 @@ impl<'a> Interp<'a> {
                 self.set_var(name, v)?;
                 self.snapshot_vars();
             }
+            Block::Uia { elem, action, timeout_ms, fallback_click } => self.run_uia(elem, action, timeout_ms, *fallback_click)?,
             Block::OcrToVar { name, region } => {
                 let t = self.io.ocr(*region)?;
                 self.set_var(name, Value::String(t.trim().into()))?;
@@ -345,6 +354,7 @@ impl<'a> Interp<'a> {
             CondKind::WindowExists => self.io.window_exists(),
             CondKind::WindowForeground => self.io.window_foreground(),
             CondKind::TitleMatches(p) => glob_match(p, &self.io.window_title()),
+            CondKind::Uia { elem, test } => self.cond_uia(elem, test)?,
             CondKind::Expr(s) => match self.eval(s)? {
                 Value::Boolean(b) => b,
                 v => return Err(Halt::Error(format!("condição '{s}' deveria dar verdadeiro/falso, deu {v}"))),
@@ -470,6 +480,8 @@ struct WinIo {
     ocr_scale: u32,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<String>>,
+    /// Started on first use; UIA calls never run on this run's thread itself (timeouts).
+    uia: uia::Worker<uia::Ctx>,
 }
 
 impl WinIo {
@@ -542,6 +554,16 @@ impl Io for WinIo {
     fn sleep(&mut self, ms: u64) {
         std::thread::sleep(Duration::from_millis(ms));
     }
+    // No `gate()`: UIA sends no input, so it runs while the user types (even in Focus mode).
+    fn uia(&mut self, q: &uia::Query) -> R<uia::Reply> {
+        self.alive()?;
+        let (hwnd, q) = (self.inj.top, q.clone());
+        match self.uia.call(uia::CALL_TIMEOUT, move |c| uia::query(c, hwnd, &q)) {
+            Ok(r) => Ok(r),
+            Err(uia::CallErr::Timeout) => Ok(uia::Reply::TimedOut),
+            Err(uia::CallErr::Failed(e)) => Err(Halt::Error(e)),
+        }
+    }
 }
 
 /// `delay_ms`: wait before starting (trigger delay), still stoppable.
@@ -599,6 +621,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
                 ocr_scale,
                 stop: stop.clone(),
                 status: status.clone(),
+                uia: uia::session(),
             };
             io.inj.prepare();
             let mut log_fn = |m: String| say(m);

@@ -1,3 +1,4 @@
+use crate::uia::{UiaAction, UiaElem, UiaTest};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -131,6 +132,13 @@ pub enum CondKind {
     WindowForeground,
     TitleMatches(String),
     Expr(String),
+    /// UI Automation element of the target window.
+    Uia {
+        #[serde(default)]
+        elem: UiaElem,
+        #[serde(default)]
+        test: UiaTest,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -163,6 +171,19 @@ pub enum Block {
     While { cond: Condition, body: Vec<Block> },
     SetVar { name: String, expr: String },
     OcrToVar { name: String, region: Region },
+    /// Acts on a control through UI Automation: no mouse or keyboard input at all.
+    Uia {
+        #[serde(default)]
+        elem: UiaElem,
+        #[serde(default)]
+        action: UiaAction,
+        /// expr: how long to wait for the element to appear.
+        #[serde(default = "crate::uia::default_timeout")]
+        timeout_ms: String,
+        /// Element not found: click the captured point instead of stopping with an error.
+        #[serde(default)]
+        fallback_click: bool,
+    },
     Call { script: String },
     Log { text: String },
     Breakpoint,
@@ -185,6 +206,7 @@ impl Block {
             Block::While { .. } => "Enquanto",
             Block::SetVar { .. } => "Definir variável",
             Block::OcrToVar { .. } => "Ler texto (OCR)",
+            Block::Uia { .. } => "Elemento (UIA)",
             Block::Call { .. } => "Chamar script",
             Block::Log { .. } => "Mostrar no log",
             Block::Breakpoint => "Breakpoint (pausar)",
@@ -208,6 +230,7 @@ impl Block {
             Block::While { .. } => "Enquanto …".into(),
             Block::SetVar { name, expr } => format!("{name} = {expr}"),
             Block::OcrToVar { name, region } => format!("{name} = OCR ({}, {}, {}×{})", region.x, region.y, region.w, region.h),
+            Block::Uia { elem, action, .. } => format!("Elemento {}: {}", crate::uia::describe(elem), action.label()),
             Block::Call { script } => format!("Chamar '{script}'"),
             Block::Log { text } => format!("Log \"{text}\""),
             Block::Breakpoint => "Breakpoint".into(),
@@ -224,6 +247,7 @@ impl Block {
             Block::Key { vk: 0x0D, action: KeyAction::Press },
             Block::Type { text: String::new() },
             Block::Scroll { x: s("0"), y: s("0"), delta: -120 },
+            Block::Uia { elem: UiaElem::default(), action: UiaAction::Invoke, timeout_ms: crate::uia::default_timeout(), fallback_click: false },
             Block::Wait { ms: s("500"), jitter_ms: 0 },
             Block::WaitUntil { cond: Condition::default(), timeout_ms: s("10000"), on_timeout: OnTimeout::Stop },
             Block::If { cond: Condition::default(), then: vec![], else_: vec![] },
@@ -478,7 +502,14 @@ fn check_cond(errs: &mut Vec<String>, path: &str, c: &Condition) {
         }
         CondKind::OcrContains { region, .. } if region.w <= 0 || region.h <= 0 => errs.push(format!("{path}.kind.OcrContains.region: w e h devem ser > 0")),
         CondKind::Expr(e) => check_expr(errs, &format!("{path}.kind.Expr"), e),
+        CondKind::Uia { elem, .. } => check_uia_elem(errs, &format!("{path}.kind.Uia.elem"), elem),
         _ => {}
+    }
+}
+
+fn check_uia_elem(errs: &mut Vec<String>, path: &str, e: &UiaElem) {
+    for (field, m) in crate::uia::elem_errors(e) {
+        errs.push(if field.is_empty() { format!("{path}: {m}") } else { format!("{path}.{field}: {m}") });
     }
 }
 
@@ -528,6 +559,19 @@ fn validate_blocks(blocks: &[Block], path: &str, known: &[String], errs: &mut Ve
                 }
                 if region.w <= 0 || region.h <= 0 {
                     errs.push(format!("{}: w e h devem ser > 0", f("region")));
+                }
+            }
+            Block::Uia { elem, action, timeout_ms, .. } => {
+                check_uia_elem(errs, &f("elem"), elem);
+                check_expr(errs, &f("timeout_ms"), timeout_ms);
+                match action {
+                    UiaAction::ReadValue(v) | UiaAction::ReadName(v) if !is_ident(v) => errs.push(format!("{}: \"{v}\" não é um nome de variável válido", f("action"))),
+                    UiaAction::SetValue(t) => {
+                        if let Err(e) = interpolate(t, |e| expr_error(e).map_or(Ok(String::new()), |m| Err(format!("{{{e}}}: {m}")))) {
+                            errs.push(format!("{}: {e}", f("action.SetValue")));
+                        }
+                    }
+                    _ => {}
                 }
             }
             Block::Call { script } if !known.contains(script) => errs.push(format!("{}: script \"{script}\" não encontrado na pasta", f("script"))),
@@ -677,6 +721,32 @@ mod tests {
         let s: Script = serde_json::from_str(r#"{"name":"x","blocks":["Stop",{"Wait":{"ms":"1","jitter_ms":0}}]}"#).unwrap();
         assert_eq!(s.blocks.len(), 2);
         assert_eq!(s.speed, 1.0); // missing fields take defaults
+    }
+
+    #[test]
+    fn uia_validation() {
+        use crate::uia::UiaElem;
+        let s = |v: &str| v.to_string();
+        let ok_elem = UiaElem { automation_id: s("btnOk"), control_type: s("Button"), ..Default::default() };
+        // Only elem and action are needed; timeout and fallback take defaults.
+        let json = r#"{"name":"u","blocks":[{"Uia":{"elem":{"automation_id":"btnOk","control_type":"Button"},"action":"Invoke"}},
+            {"If":{"cond":{"kind":{"Uia":{"elem":{"name":"OK"}}},"negate":false},"then":[],"else_":[]}}]}"#;
+        let parsed: Script = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.blocks[0], Block::Uia { elem: ok_elem, action: UiaAction::Invoke, timeout_ms: s("5000"), fallback_click: false });
+        assert!(matches!(&parsed.blocks[1], Block::If { cond: Condition { kind: CondKind::Uia { test: UiaTest::Exists, .. }, .. }, .. }));
+        assert_eq!(validate(&parsed, &[]), Vec::<String>::new());
+        let bad = Script {
+            name: s("bad"),
+            blocks: vec![
+                Block::Uia { elem: UiaElem::default(), action: UiaAction::ReadValue(s("1x")), timeout_ms: s("x >"), fallback_click: true },
+                Block::Uia { elem: UiaElem { control_type: s("Botao"), ..Default::default() }, action: UiaAction::SetValue(s("{a +}")), timeout_ms: s("100"), fallback_click: false },
+                Block::WaitUntil { cond: Condition { kind: CondKind::Uia { elem: UiaElem::default(), test: UiaTest::Checked }, negate: false }, timeout_ms: s("1"), on_timeout: OnTimeout::Stop },
+            ],
+            ..Default::default()
+        };
+        let errs = validate(&bad, &[]);
+        let paths: Vec<&str> = errs.iter().map(|e| e.split(':').next().unwrap()).collect();
+        assert_eq!(paths, ["blocks[0].elem", "blocks[0].timeout_ms", "blocks[0].action", "blocks[1].elem.control_type", "blocks[1].action.SetValue", "blocks[2].cond.kind.Uia.elem"], "{errs:#?}");
     }
 
     #[test]

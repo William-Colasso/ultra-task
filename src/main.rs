@@ -3,6 +3,7 @@
 mod hooks;
 mod model;
 mod runner;
+mod uia;
 mod ui;
 mod win;
 
