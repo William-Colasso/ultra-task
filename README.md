@@ -22,7 +22,7 @@ A diferença principal é que cada script roda **numa janela-alvo** e, no modo S
 | Captura de janela coberta (Windows Graphics Capture) | 10 1903 ou mais novo | não: continua no `PrintWindow` e o log avisa | — |
 | Elementos (UI Automation) | sim | sim | — |
 | Modo Navegador (CDP) | sim | sim, com um navegador que ainda rode no 8.1 (Chrome/Edge 109) | — |
-| Integrações, exportar .exe, gatilhos, bandeja | sim | sim | — |
+| Integrações (REST, Arquivo, Comando, Área de transferência, SQLite, ODBC), exportar .exe, gatilhos, bandeja | sim | sim | — |
 
 O recurso que falta não derruba o app: a mensagem vai para o log (ou para a caixa de erro, no caso da janela) e o resto continua funcionando.
 
@@ -37,7 +37,7 @@ cargo build --release
 O resultado é um único `target/release/ultratask.exe`. Os scripts ficam em `scripts\` ao lado do .exe, então dá para copiar a pasta e levar tudo junto.
 
 ### x64, x86 e ARM64 de uma vez
-Nenhuma dependência compila código C, então basta o MSVC (o `link.exe` e as bibliotecas de cada arquitetura). Uma vez só:
+Basta o MSVC de cada arquitetura: o único código C é o SQLite embutido (`rusqlite` com `bundled`), que o próprio `cl.exe` compila. Uma vez só:
 
 1. Instale os alvos do Rust:
    ```powershell
