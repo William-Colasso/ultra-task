@@ -1,11 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod catalog;
+mod cola;
+mod editor;
 mod hooks;
+mod humanmouse;
+mod integrations;
+mod manual;
 mod model;
 mod runner;
+mod tree;
+mod ui;
 mod uia;
 mod uia_rec;
-mod ui;
 mod win;
 
 use std::sync::Arc;

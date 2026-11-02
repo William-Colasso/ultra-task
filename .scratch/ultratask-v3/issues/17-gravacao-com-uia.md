@@ -53,6 +53,13 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu` + Wine; veja `../AMBIENT
 - **Corrida conhecida:** o hook roda antes de o app receber o botão pressionado, e a leitura começa logo em seguida. Num botão que fecha a janela já no pressionar, o elemento pode sumir antes da leitura; nesse caso o clique fica como `Click`.
 - **Parar a gravação** pode atrasar o `Out::Recorded` até os cliques pendentes serem lidos (no máximo 2 s por clique travado). O hook não espera.
 
+### Merge com `main-vqbyri` (tickets 01–04 e 09)
+Commit de merge no mesmo branch (`merge: main-vqbyri nos tickets 16 e 17`). Adaptações:
+- **Explodir em passos** agora fica em `src/editor.rs` (`Op::Explode`), que passou a chamar `uia_rec::upgrade_clicks(runner::explode(..), ..)`; o `blocks_ui` antigo do `ui.rs` saiu no merge.
+- `model::tests::old_recordings_unchanged` compara byte a byte só o bloco `Recording`: o `Script` ganhou campos novos em outros tickets (`human_mouse`, `integrations`), que aparecem ao regravar o script inteiro.
+- Teste do editor ajustado para o campo `elements` do `Recording`.
+- Depois do merge: `cargo test --target x86_64-pc-windows-gnu` com 96 passando, 4 ignorados e sem warnings.
+
 ### Pendente no Windows
 1. Rode `cargo test -- --include-ignored` (inclui `real_uia_on_own_window`, do ticket 16, que exercita o mesmo `capture`).
 2. **Gravar e explodir com a janela coberta:**

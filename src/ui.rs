@@ -1,10 +1,13 @@
+use crate::editor;
 use crate::hooks::{self, Cmd, Hooks, Out};
+use crate::catalog::{self, FieldKind};
+use crate::manual::{self, Section};
 use crate::model::{self, *};
 use crate::runner::{self, RunHandle};
 use crate::uia::{self, UiaAction, UiaElem, UiaTest};
 use crate::win::{self, Hwnd, WinInfo};
 use crate::{TrayMsg, make_tray};
-use eframe::egui::{self, Color32, ComboBox, DragValue, Id, RichText, Ui, ViewportCommand};
+use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui, ViewportCommand};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -15,6 +18,7 @@ use std::time::{Duration, Instant};
 enum Tab {
     Blocks,
     Config,
+    Integrations,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -72,6 +76,7 @@ pub struct App {
     seen: HashMap<String, HashSet<Hwnd>>,
     /// `--tray`: eframe always shows the window after its first frame, so re-hide for a few frames.
     hide_frames: u8,
+    manual: manual::Manual,
 }
 
 fn theme_pref(t: Theme) -> egui::ThemePreference {
@@ -140,6 +145,7 @@ impl App {
             startup_done: HashSet::new(),
             seen: HashMap::new(),
             hide_frames: if start_hidden { 3 } else { 0 },
+            manual: Default::default(),
         };
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
@@ -517,6 +523,9 @@ impl App {
                 if ui.button("⚙ Ajustes").clicked() {
                     self.show_settings = !self.show_settings;
                 }
+                if ui.button("📖 Manual").clicked() {
+                    self.manual.open = !self.manual.open;
+                }
                 let dark = ui.ctx().theme() == egui::Theme::Dark;
                 if ui.button(if dark { "☀" } else { "🌙" }).on_hover_text("Alternar tema claro/escuro").clicked() {
                     self.settings.theme = if dark { Theme::Light } else { Theme::Dark };
@@ -693,19 +702,27 @@ impl App {
             ui.add_space(16.0);
             ui.selectable_value(&mut self.tab, Tab::Blocks, "Blocos");
             ui.selectable_value(&mut self.tab, Tab::Config, "Config");
+            ui.selectable_value(&mut self.tab, Tab::Integrations, "Integrações");
         });
         ui.separator();
         // ponytail: change detection by comparing against a clone; cheap since egui only repaints on input.
         let before = self.scripts[i].clone();
         let names: Vec<String> = self.scripts.iter().map(|s| s.name.clone()).collect();
+        let vars = catalog::script_vars(&self.scripts[i], &self.scripts);
         match self.tab {
             Tab::Blocks => {
+                egui::Panel::left("palette").resizable(false).default_size(170.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| editor::palette_ui(ui, &mut self.scripts[i].blocks));
+                });
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut ec = EditCtx { names: &names, pick_req: &mut self.pick_req, pick_result: &mut self.pick_result };
-                    blocks_ui(ui, &mut self.scripts[i].blocks, Id::unique("blocks"), &mut ec);
+                    let mut ec = EditCtx { names: &names, pick_req: &mut self.pick_req, pick_result: &mut self.pick_result, vars: &vars, manual: &mut self.manual };
+                    blocks_ui(ui, &mut self.scripts[i].blocks, Id::unique(("blocks", &names[i])), &mut ec);
                 });
             }
             Tab::Config => egui::ScrollArea::vertical().show(ui, |ui| self.config_ui(ui, i)).inner,
+            Tab::Integrations => {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| crate::integrations::editor::integrations_ui(ui, &mut self.scripts[i].integrations));
+            }
         }
         if self.scripts[i] != before {
             self.dirty = true;
@@ -825,8 +842,15 @@ impl App {
             });
             ui.end_row();
 
+            ui.label("Mouse");
+            ui.vertical(|ui| {
+                ui.checkbox(&mut s.human_mouse, "Movimento humano do mouse");
+                ui.weak("Mover, Clique e Rolar levam o ponteiro por uma curva, em vez de saltar até o ponto. Blocos de gravação tocam como foram gravados.");
+            });
+            ui.end_row();
+
             ui.label("Debug");
-            ui.checkbox(&mut s.trace, "Registrar cada bloco no log ao rodar");
+            ui.checkbox(&mut s.trace,"Registrar cada bloco no log ao rodar");
             ui.end_row();
 
             ui.label("Tamanho gravado");
@@ -1004,6 +1028,7 @@ impl eframe::App for App {
         egui::Panel::left("left").resizable(true).default_size(240.0).show(ui, |ui| self.library(ui));
         egui::CentralPanel::default().show(ui, |ui| self.center(ui, &ctx));
         self.modals(&ctx);
+        manual::window(&ctx, &mut self.manual, &self.settings);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1018,6 +1043,9 @@ struct EditCtx<'a> {
     names: &'a [String],
     pick_req: &'a mut Option<Pick>,
     pick_result: &'a mut Option<(Id, PickData)>,
+    /// Variáveis do script, para a cola.
+    vars: &'a [String],
+    manual: &'a mut manual::Manual,
 }
 
 impl EditCtx<'_> {
@@ -1027,14 +1055,6 @@ impl EditCtx<'_> {
             _ => None,
         }
     }
-}
-
-enum Act {
-    Up,
-    Down,
-    Dup,
-    Del,
-    Explode,
 }
 
 fn rename_calls(blocks: &mut [Block], old: &str, new: &str) -> bool {
@@ -1054,89 +1074,38 @@ fn rename_calls(blocks: &mut [Block], old: &str, new: &str) -> bool {
 }
 
 fn blocks_ui(ui: &mut Ui, blocks: &mut Vec<Block>, id: Id, ec: &mut EditCtx) {
-    let mut act = None;
-    for i in 0..blocks.len() {
-        let bid = id.with(i);
-        ui.push_id(i, |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if ui.small_button("⬆").clicked() {
-                        act = Some((i, Act::Up));
-                    }
-                    if ui.small_button("⬇").clicked() {
-                        act = Some((i, Act::Down));
-                    }
-                    if ui.small_button("📋").on_hover_text("Duplicar").clicked() {
-                        act = Some((i, Act::Dup));
-                    }
-                    if ui.small_button("🗑").on_hover_text("Excluir").clicked() {
-                        act = Some((i, Act::Del));
-                    }
-                    ui.label(RichText::new(blocks[i].title()).strong());
-                    if block_fields(ui, &mut blocks[i], bid, ec) {
-                        act = Some((i, Act::Explode));
-                    }
-                });
-                match &mut blocks[i] {
-                    Block::If { then, else_, .. } => {
-                        ui.indent("then", |ui| {
-                            ui.weak("então:");
-                            blocks_ui(ui, then, bid.with("then"), ec);
-                        });
-                        ui.indent("else", |ui| {
-                            ui.weak("senão:");
-                            blocks_ui(ui, else_, bid.with("else"), ec);
-                        });
-                    }
-                    Block::Repeat { body, .. } | Block::While { body, .. } => {
-                        ui.indent("body", |ui| blocks_ui(ui, body, bid.with("body"), ec));
-                    }
-                    _ => {}
-                }
-            });
-        });
-    }
-    match act {
-        Some((i, Act::Up)) if i > 0 => blocks.swap(i, i - 1),
-        Some((i, Act::Down)) if i + 1 < blocks.len() => blocks.swap(i, i + 1),
-        Some((i, Act::Dup)) => blocks.insert(i + 1, blocks[i].clone()),
-        Some((i, Act::Del)) => {
-            blocks.remove(i);
-        }
-        Some((i, Act::Explode)) => {
-            if let Block::Recording { events, elements, .. } = &blocks[i] {
-                let new = crate::uia_rec::upgrade_clicks(runner::explode(events), events, elements);
-                blocks.splice(i..=i, new);
-            }
-        }
-        _ => {}
-    }
-    ui.push_id("add", |ui| {
-        ui.menu_button("➕ bloco", |ui| {
-            for t in Block::templates() {
-                if ui.button(t.title()).clicked() {
-                    blocks.push(t);
-                    ui.close();
-                }
-            }
-        });
-    });
+    editor::tree_ui(ui, blocks, id, &mut |ui, b, bid| block_fields(ui, b, bid, ec));
 }
 
-fn expr_edit(ui: &mut Ui, s: &mut String, width: f32) {
+fn expr_edit(ui: &mut Ui, s: &mut String, width: f32, id: Id, ec: &mut EditCtx) {
     let ok = model::expr_error(s).is_none();
-    let mut te = egui::TextEdit::singleline(s).desired_width(width);
-    if !ok {
-        te = te.text_color(Color32::from_rgb(230, 60, 60));
+    let (r, ask) = crate::cola::field(ui, id, s, width, FieldKind::Expr, ec.vars, "", !ok);
+    r.on_hover_text(if ok { "número ou expressão (ex.: x + 10, rand(1, 5))" } else { "expressão inválida" });
+    if ask {
+        ec.manual.ask(Section::Expressoes);
     }
-    ui.add(te).on_hover_text(if ok { "número ou expressão (ex.: x + 10, rand(1, 5))" } else { "expressão inválida" });
+}
+
+/// Campo de texto com `{expressão}` (Digitar, Mostrar no log), com cola dentro das chaves.
+fn text_edit(ui: &mut Ui, s: &mut String, id: Id, ec: &mut EditCtx, hint: &str) {
+    if crate::cola::field(ui, id, s, 320.0, FieldKind::Text, ec.vars, hint, false).1 {
+        ec.manual.ask(Section::Expressoes);
+    }
+    help_btn(ui, ec);
+}
+
+/// "?" junto ao campo: abre o Manual em Expressões.
+fn help_btn(ui: &mut Ui, ec: &mut EditCtx) {
+    if ui.small_button("?").on_hover_text("Manual: expressões").clicked() {
+        ec.manual.ask(Section::Expressoes);
+    }
 }
 
 fn xy_ui(ui: &mut Ui, x: &mut String, y: &mut String, id: Id, ec: &mut EditCtx) -> Option<[u8; 3]> {
     ui.label("x");
-    expr_edit(ui, x, 90.0);
+    expr_edit(ui, x, 90.0, id.with("x"), ec);
     ui.label("y");
-    expr_edit(ui, y, 90.0);
+    expr_edit(ui, y, 90.0, id.with("y"), ec);
     if ui.small_button("📍").on_hover_text("Capturar clicando na janela-alvo").clicked() {
         *ec.pick_req = Some(Pick::Point(id));
     }
@@ -1220,7 +1189,7 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             enum_combo(ui, action, id.with("a"), &[(KeyAction::Press, "apertar"), (KeyAction::Down, "pressionar"), (KeyAction::Up, "soltar")]);
         }
         Block::Type { text } => {
-            ui.add(egui::TextEdit::singleline(text).desired_width(320.0).hint_text("texto; use {variavel} ou {expressão}"));
+            text_edit(ui, text, id.with("text"), ec, "texto; use {variavel} ou {expressão}");
         }
         Block::Scroll { x, y, delta } => {
             xy_ui(ui, x, y, id, ec);
@@ -1228,34 +1197,35 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             ui.weak("(120 = um passo; negativo = para baixo)");
         }
         Block::Wait { ms, jitter_ms } => {
-            expr_edit(ui, ms, 80.0);
+            expr_edit(ui, ms, 80.0, id.with("ms"), ec);
             ui.label("ms");
             ui.add(DragValue::new(jitter_ms).range(0..=60_000).prefix("± ").suffix(" ms"));
         }
         Block::WaitUntil { cond, timeout_ms, on_timeout } => {
             cond_ui(ui, cond, id.with("c"), ec);
             ui.label("timeout");
-            expr_edit(ui, timeout_ms, 70.0);
+            expr_edit(ui, timeout_ms, 70.0, id.with("to"), ec);
             ui.label("ms, então");
             enum_combo(ui, on_timeout, id.with("t"), &[(OnTimeout::Stop, "parar com erro"), (OnTimeout::Continue, "continuar")]);
         }
         Block::If { cond, .. } | Block::While { cond, .. } => cond_ui(ui, cond, id.with("c"), ec),
         Block::Repeat { times, .. } => {
-            expr_edit(ui, times, 60.0);
+            expr_edit(ui, times, 60.0, id.with("n"), ec);
             ui.label("vezes");
         }
         Block::SetVar { name, expr } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
             ui.label("=");
-            expr_edit(ui, expr, 240.0);
+            expr_edit(ui, expr, 240.0, id.with("e"), ec);
+            help_btn(ui, ec);
         }
         Block::Uia { elem, action, timeout_ms, fallback_click } => {
             if let Some(Some(suggested)) = uia_elem_ui(ui, elem, id, ec) {
                 *action = suggested;
             }
-            uia_action_ui(ui, action, id.with("act"));
+            uia_action_ui(ui, action, id.with("act"), ec);
             ui.label("esperar até");
-            expr_edit(ui, timeout_ms, 60.0);
+            expr_edit(ui, timeout_ms, 60.0, id.with("uiat"), ec);
             ui.label("ms");
             ui.checkbox(fallback_click, "se não achar, clicar no ponto").on_hover_text("Sem esta opção, o bloco para com erro quando o elemento não aparece");
         }
@@ -1272,7 +1242,7 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             });
         }
         Block::Log { text } => {
-            ui.add(egui::TextEdit::singleline(text).desired_width(320.0).hint_text("ex.: contador = {contador}"));
+            text_edit(ui, text, id.with("text"), ec, "ex.: contador = {contador}");
         }
         Block::Breakpoint => {
             ui.weak("pausa a execução aqui; veja as variáveis no painel e clique ▶ para continuar");
@@ -1319,7 +1289,10 @@ fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
         CondKind::TitleMatches(p) => {
             ui.add(egui::TextEdit::singleline(p).desired_width(200.0));
         }
-        CondKind::Expr(s) => expr_edit(ui, s, 240.0),
+        CondKind::Expr(s) => {
+            expr_edit(ui, s, 240.0, id.with("expr"), ec);
+            help_btn(ui, ec);
+        }
         CondKind::WindowExists | CondKind::WindowForeground => {}
         CondKind::Uia { elem, test } => {
             uia_elem_ui(ui, elem, id, ec);
@@ -1383,7 +1356,7 @@ fn uia_elem_ui(ui: &mut Ui, e: &mut UiaElem, id: Id, ec: &mut EditCtx) -> Option
     None
 }
 
-fn uia_action_ui(ui: &mut Ui, a: &mut UiaAction, id: Id) {
+fn uia_action_ui(ui: &mut Ui, a: &mut UiaAction, id: Id, ec: &mut EditCtx) {
     let same = |x: &UiaAction, y: &UiaAction| std::mem::discriminant(x) == std::mem::discriminant(y);
     ComboBox::from_id_salt(id).selected_text(a.label()).show_ui(ui, |ui| {
         for o in UiaAction::all() {
@@ -1393,9 +1366,7 @@ fn uia_action_ui(ui: &mut Ui, a: &mut UiaAction, id: Id) {
         }
     });
     match a {
-        UiaAction::SetValue(t) => {
-            ui.add(egui::TextEdit::singleline(t).desired_width(200.0).hint_text("texto; aceita {variavel}"));
-        }
+        UiaAction::SetValue(t) => text_edit(ui, t, id.with("val"), ec, "texto; aceita {variavel}"),
         UiaAction::ReadValue(v) | UiaAction::ReadName(v) => {
             ui.add(egui::TextEdit::singleline(v).desired_width(100.0).hint_text("variável"));
         }
@@ -1413,7 +1384,26 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("uia.rs"), include_str!("runner/uia_block.rs"), include_str!("uia_rec.rs")].concat();
+        let src = [
+            include_str!("catalog.rs"),
+            include_str!("cola.rs"),
+            include_str!("editor.rs"),
+            include_str!("humanmouse.rs"),
+            include_str!("integrations/editor.rs"),
+            include_str!("integrations/engine.rs"),
+            include_str!("integrations/http.rs"),
+            include_str!("integrations/mod.rs"),
+            include_str!("main.rs"),
+            include_str!("manual.rs"),
+            include_str!("model.rs"),
+            include_str!("runner.rs"),
+            include_str!("runner/uia_block.rs"),
+            include_str!("tree.rs"),
+            include_str!("ui.rs"),
+            include_str!("uia.rs"),
+            include_str!("uia_rec.rs"),
+        ]
+        .concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
@@ -1429,5 +1419,32 @@ mod tests {
         }
         let missing: String = ctx.fonts_mut(|f| chars.into_iter().filter(|&c| !f.has_glyph(&egui::FontId::proportional(14.0), c) || !f.has_glyph(&egui::FontId::monospace(14.0), c)).collect());
         assert!(missing.is_empty(), "sem glifo: {missing:?}");
+    }
+
+    /// Clicar no "?" junto a um campo abre o Manual direto em Expressões.
+    #[test]
+    fn help_button_opens_expressions() {
+        let ctx = egui::Context::default();
+        let mut manual = manual::Manual { open: false, section: Section::Teclas };
+        let (mut pr, mut res) = (None, None);
+        let mut rect = egui::Rect::NOTHING;
+        for events in [vec![], vec![], vec![true], vec![false]] {
+            let events = events
+                .into_iter()
+                .flat_map(|down| {
+                    let pos = rect.center();
+                    [egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: down, modifiers: Default::default() }]
+                })
+                .collect();
+            ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                let mut ec = EditCtx { names: &[], pick_req: &mut pr, pick_result: &mut res, vars: &[], manual: &mut manual };
+                help_btn(ui, &mut ec);
+                rect = ui.min_rect();
+            })
+            .textures_delta
+            .clear();
+        }
+        assert!(manual.open);
+        assert_eq!(manual.section, Section::Expressoes);
     }
 }

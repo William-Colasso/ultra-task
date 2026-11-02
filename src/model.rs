@@ -244,7 +244,7 @@ impl Block {
         }
     }
 
-    /// One fresh instance of every block type, for the "+ bloco" menu.
+    /// One fresh instance of every block type, for the block palette.
     pub fn templates() -> Vec<Block> {
         let s = |v: &str| v.to_string();
         vec![
@@ -283,7 +283,12 @@ pub struct Script {
     pub trigger: Trigger,
     /// Debug: log every block as it runs.
     pub trace: bool,
+    /// Mover/Clique/Rolar levam o ponteiro por um trajeto humano em vez de teletransportar.
+    pub human_mouse: bool,
     pub blocks: Vec<Block>,
+    /// Aba Integrações: rodam em paralelo ao fluxo (veja `integrations`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<crate::integrations::Integration>,
 }
 
 impl Default for Script {
@@ -299,7 +304,9 @@ impl Default for Script {
             client_size: None,
             trigger: Trigger::Manual,
             trace: false,
+            human_mouse: false,
             blocks: vec![],
+            integrations: vec![],
         }
     }
 }
@@ -470,7 +477,7 @@ pub fn expr_error(s: &str) -> Option<String> {
     }
 }
 
-fn is_ident(s: &str) -> bool {
+pub fn is_ident(s: &str) -> bool {
     let mut c = s.chars();
     c.next().is_some_and(|f| f.is_alphabetic() || f == '_') && c.all(|ch| ch.is_alphanumeric() || ch == '_')
 }
@@ -491,6 +498,7 @@ pub fn validate(s: &Script, known: &[String]) -> Vec<String> {
         errs.push("trigger: gatilhos precisam de um target".into());
     }
     validate_blocks(&s.blocks, "blocks", known, &mut errs);
+    crate::integrations::validate(&s.integrations, &mut errs);
     errs
 }
 
@@ -736,15 +744,16 @@ mod tests {
         assert_eq!(s.speed, 1.0); // missing fields take defaults
     }
 
-    /// Ticket 17: a recording saved before `elements` existed parses, validates and is
-    /// written back byte for byte.
+    /// Ticket 17: a recording saved before `elements` existed parses, validates and its
+    /// block is written back byte for byte.
     #[test]
     fn old_recordings_unchanged() {
         let old = r#"{"name":"velho","target":null,"mode":"Background","simulate_focus":false,"speed":1.0,"repeat":1,"hotkey":null,"client_size":[800,600],"trigger":"Manual","trace":false,"blocks":[{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}},{"t":90,"ev":{"Button":["Left",true,10,20]}},{"t":150,"ev":{"Button":["Left",false,10,20]}}],"speed":1.0}}]}"#;
         let s: Script = serde_json::from_str(old).unwrap();
         assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.is_empty()));
         assert_eq!(validate(&s, &[]), Vec::<String>::new());
-        assert_eq!(serde_json::to_string(&s).unwrap(), old);
+        let block = &old[old.find(r#"{"Recording""#).unwrap()..old.len() - 2];
+        assert_eq!(serde_json::to_string(&s.blocks[0]).unwrap(), block);
         let new = old.replace(r#""speed":1.0}}]"#, r#""speed":1.0,"elements":[{"event":1,"elem":{"name":"OK","control_type":"Button","x":10,"y":20},"action":"Invoke"}]}}]"#);
         let s: Script = serde_json::from_str(&new).unwrap();
         assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.len() == 1));

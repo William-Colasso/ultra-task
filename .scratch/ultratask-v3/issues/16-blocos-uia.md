@@ -81,6 +81,15 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu` + Wine; veja `../AMBIENT
 - **O ponto capturado** (`x`, `y`) fica dentro de `elem`, em inteiros como no `Region`, porque serve ao bloco (reserva) e à condição (desempate).
 - **`Io::uia` tem implementação padrão**, para que os `Io` falsos de outros tickets continuem compilando.
 
+### Merge com `main-vqbyri` (tickets 01–04 e 09)
+Commit de merge no mesmo branch (`merge: main-vqbyri nos tickets 16 e 17`). Adaptações:
+- `src/tree.rs`: `category` põe o bloco Uia em "ação", ou em "variáveis" quando lê valor/nome; teste `tree::tests::categories` cobre os dois casos.
+- `src/manual.rs`: texto do bloco Uia em `block_help` e entrada "elemento (UIA)" na seção Condições.
+- `src/catalog.rs`: `block_vars` lista a variável de `ReadValue`/`ReadName`; teste novo `catalog::tests::uia_read_vars_are_listed`.
+- `src/runner/uia_block.rs`: leitura para variável chama `var_set` (gatilhos das integrações), como o `SetVar`.
+- `src/ui.rs`: o campo de timeout usa a nova assinatura de `expr_edit` e o texto de "definir valor" usa `text_edit` (cola de variáveis); arquivos `runner/uia_block.rs`, `uia.rs` e `uia_rec.rs` na lista do teste de glifos.
+- Depois do merge: `cargo test --target x86_64-pc-windows-gnu` com 96 passando, 4 ignorados e sem warnings; `--validate` (com `LC_ALL=C.UTF-8`) deu OK nos seis exemplos completos da skill.
+
 ### Pendente no Windows
 Pré-requisito: `cargo build --release` (MSVC) e `cargo test -- --include-ignored` na pasta do worktree.
 1. **Teste real:** `cargo test real_uia_on_own_window -- --ignored` passa (Toggle e SetValue lidos de volta pela UIA; a captura do checkbox sugere `Toggle`).

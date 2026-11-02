@@ -113,6 +113,15 @@ pub fn screen_to_client(h: Hwnd, x: i32, y: i32) -> (i32, i32) {
     (p.x, p.y)
 }
 
+/// Posição do cursor real, em coordenadas de cliente de `h`.
+pub fn cursor_client(h: Hwnd) -> (i32, i32) {
+    let mut p = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut p);
+    }
+    screen_to_client(h, p.x, p.y)
+}
+
 fn client_to_screen(h: Hwnd, x: i32, y: i32) -> (i32, i32) {
     let mut p = POINT { x, y };
     unsafe {

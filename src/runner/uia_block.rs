@@ -30,6 +30,7 @@ impl Interp<'_> {
                 Reply::Text(s) => {
                     if let UiaAction::ReadValue(v) | UiaAction::ReadName(v) = action {
                         self.set_var(v, Value::String(s))?;
+                        self.var_set(v);
                         self.snapshot_vars();
                     }
                     return Ok(());
