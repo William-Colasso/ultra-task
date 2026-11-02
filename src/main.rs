@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod editor;
 mod hooks;
 mod model;
 mod runner;
+mod tree;
 mod ui;
 mod win;
 

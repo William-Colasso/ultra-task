@@ -1,9 +1,10 @@
+use crate::editor;
 use crate::hooks::{self, Cmd, Hooks, Out};
 use crate::model::{self, *};
 use crate::runner::{self, RunHandle};
 use crate::win::{self, Hwnd, WinInfo};
 use crate::{TrayMsg, make_tray};
-use eframe::egui::{self, Color32, ComboBox, DragValue, Id, RichText, Ui, ViewportCommand};
+use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui, ViewportCommand};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -1006,14 +1007,6 @@ impl EditCtx<'_> {
     }
 }
 
-enum Act {
-    Up,
-    Down,
-    Dup,
-    Del,
-    Explode,
-}
-
 fn rename_calls(blocks: &mut [Block], old: &str, new: &str) -> bool {
     let mut hit = false;
     for b in blocks {
@@ -1031,73 +1024,7 @@ fn rename_calls(blocks: &mut [Block], old: &str, new: &str) -> bool {
 }
 
 fn blocks_ui(ui: &mut Ui, blocks: &mut Vec<Block>, id: Id, ec: &mut EditCtx) {
-    let mut act = None;
-    for i in 0..blocks.len() {
-        let bid = id.with(i);
-        ui.push_id(i, |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if ui.small_button("⬆").clicked() {
-                        act = Some((i, Act::Up));
-                    }
-                    if ui.small_button("⬇").clicked() {
-                        act = Some((i, Act::Down));
-                    }
-                    if ui.small_button("📋").on_hover_text("Duplicar").clicked() {
-                        act = Some((i, Act::Dup));
-                    }
-                    if ui.small_button("🗑").on_hover_text("Excluir").clicked() {
-                        act = Some((i, Act::Del));
-                    }
-                    ui.label(RichText::new(blocks[i].title()).strong());
-                    if block_fields(ui, &mut blocks[i], bid, ec) {
-                        act = Some((i, Act::Explode));
-                    }
-                });
-                match &mut blocks[i] {
-                    Block::If { then, else_, .. } => {
-                        ui.indent("then", |ui| {
-                            ui.weak("então:");
-                            blocks_ui(ui, then, bid.with("then"), ec);
-                        });
-                        ui.indent("else", |ui| {
-                            ui.weak("senão:");
-                            blocks_ui(ui, else_, bid.with("else"), ec);
-                        });
-                    }
-                    Block::Repeat { body, .. } | Block::While { body, .. } => {
-                        ui.indent("body", |ui| blocks_ui(ui, body, bid.with("body"), ec));
-                    }
-                    _ => {}
-                }
-            });
-        });
-    }
-    match act {
-        Some((i, Act::Up)) if i > 0 => blocks.swap(i, i - 1),
-        Some((i, Act::Down)) if i + 1 < blocks.len() => blocks.swap(i, i + 1),
-        Some((i, Act::Dup)) => blocks.insert(i + 1, blocks[i].clone()),
-        Some((i, Act::Del)) => {
-            blocks.remove(i);
-        }
-        Some((i, Act::Explode)) => {
-            if let Block::Recording { events, .. } = &blocks[i] {
-                let new = runner::explode(events);
-                blocks.splice(i..=i, new);
-            }
-        }
-        _ => {}
-    }
-    ui.push_id("add", |ui| {
-        ui.menu_button("➕ bloco", |ui| {
-            for t in Block::templates() {
-                if ui.button(t.title()).clicked() {
-                    blocks.push(t);
-                    ui.close();
-                }
-            }
-        });
-    });
+    editor::tree_ui(ui, blocks, id, &mut |ui, b, bid| block_fields(ui, b, bid, ec));
 }
 
 fn expr_edit(ui: &mut Ui, s: &mut String, width: f32) {
@@ -1296,7 +1223,7 @@ mod tests {
     fn ui_glyphs_exist() {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
-        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs")].concat();
+        let src = [include_str!("ui.rs"), include_str!("model.rs"), include_str!("runner.rs"), include_str!("main.rs"), include_str!("editor.rs"), include_str!("tree.rs")].concat();
         let mut chars = std::collections::BTreeSet::new();
         for line in src.lines().filter(|l| !l.trim_start().starts_with("//")) {
             let mut in_str = false;
