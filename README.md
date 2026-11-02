@@ -52,6 +52,15 @@ Em **⚙ Ajustes**, a opção **Iniciar com o Windows** faz o UltraTask subir es
 
 O tema (sistema/claro/escuro) fica em Ajustes ou no botão ☀/🌙 da barra.
 
+### Integrações
+A aba **Integrações** de cada script liga o fluxo a serviços externos sem travá-lo. Cada integração tem:
+- **gatilho**: quando um bloco define certas variáveis, a cada N segundos, ou ao terminar a execução;
+- **destino**: por enquanto REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
+- **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
+- **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
+
+O envio roda em paralelo. Para usar a resposta, ponha **Esperar até** `!r_pendente` e leia os campos com `json(r, "/caminho")`, por exemplo `json(endereco, "/logradouro")`. Os erros vão para o log, e as variáveis aparecem no painel **Execuções**. O HTTPS usa o WinHTTP do Windows, com os certificados e o proxy do sistema.
+
 ## Scripts gerados por IA
 [`skills/ultratask-scripts/SKILL.md`](skills/ultratask-scripts/SKILL.md) é uma *Agent Skill* que ensina agentes de IA a escrever o JSON dos scripts. Para instalar no Claude Code, copie a pasta para `~/.claude/skills/` (ou para `.claude/skills/` de um projeto). O agente valida o que escreveu com:
 
@@ -73,6 +82,6 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 
 ## Testes
 ```bash
-cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR) e registro numa chave temporária do HKCU
+cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local)
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
 ```

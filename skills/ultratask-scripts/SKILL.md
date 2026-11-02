@@ -49,7 +49,8 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
   "client_size": [800, 600],
   "trigger": { "OnWindowOpen": { "delay_s": 3.0 } },
   "trace": false,
-  "blocks": []
+  "blocks": [],
+  "integrations": []
 }
 ```
 
@@ -63,6 +64,7 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
 | `client_size` | `[w, h]` da área cliente em que as coordenadas foram medidas. Antes de tocar, o app redimensiona a janela para esse tamanho. Use `null` quando não souber | `null` |
 | `trigger` | `"Manual"`, `{"OnStartup":{"delay_s":N}}` (uma vez quando o UltraTask abre e a janela existe) ou `{"OnWindowOpen":{"delay_s":N}}` (a cada nova janela-alvo). Gatilhos exigem `target` | `"Manual"` |
 | `trace` | registra cada bloco no log (debug) | `false` |
+| `integrations` | chamadas REST em paralelo ao fluxo (veja *Integrações*) | `[]` |
 
 ### Blocos
 
@@ -128,10 +130,81 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 São [evalexpr](https://docs.rs/evalexpr):
 - números `3`, `2.5`; strings `"texto"` (dentro do JSON: `\"texto\"`); booleanos `true`/`false`;
 - operadores `+ - * / % ^`, `== != < > <= >=`, `&& || !`. A divisão de inteiros trunca. `+` concatena duas strings.
-- funções do UltraTask: `rand(a, b)` (inteiro sorteado entre a e b, inclusive) e `contem(texto, trecho)` (busca sem diferenciar maiúsculas);
+- funções do UltraTask: `rand(a, b)` (inteiro sorteado entre a e b, inclusive), `contem(texto, trecho)` (busca sem diferenciar maiúsculas) e `json(texto, "/caminho")` (lê um campo de um texto JSON; veja *Integrações*);
 - funções nativas: `min`, `max`, `floor`, `round`, `ceil`, `len`, `if(cond, a, b)`, `str::to_lowercase`, `str::to_uppercase`, `str::trim`, `str::from`, `str::substring`, `math::abs`, `math::sqrt`.
 
 Variáveis são globais na execução (inclusive dentro de `Call`). Uma variável só existe depois do primeiro `SetVar`/`OcrToVar`; ler antes disso é erro em tempo de execução.
+
+### Integrações (`integrations`)
+
+Uma integração envia dados para fora **em paralelo**: os blocos seguintes não esperam. O fluxo reage pelas variáveis de resultado.
+
+```json
+"integrations": [{
+  "name": "ViaCEP",
+  "when": { "OnSet": ["cep"] },
+  "dest": { "Http": { "method": "GET", "url": "https://viacep.com.br/ws/{cep}/json/", "headers": [], "timeout_ms": 10000 } },
+  "payload": { "Json": ["cep"] },
+  "result": "endereco"
+}]
+```
+
+| Campo | Valores |
+|---|---|
+| `name` | texto não vazio; aparece no log |
+| `when` | `{"OnSet": ["a", "b"]}`: quando um bloco `SetVar`/`OcrToVar` define uma dessas variáveis. `{"Every": {"s": 5.0}}`: a cada N segundos enquanto o script roda (pula se o envio anterior ainda não voltou). `"OnEnd"`: uma vez depois do último bloco; a execução espera a resposta até `timeout_ms` |
+| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string) |
+| `payload` | `{"Json": ["a", "b"]}` envia `{"a": …, "b": …}` (números continuam números). `{"Csv": ["a", "b"]}` envia uma linha CSV. `{"Text": "pedido {n}"}` envia o texto interpolado. Em `GET` o corpo não vai: ponha os valores na `url` |
+| `result` | nome de variável ou `null` |
+
+Para `"result": "r"`, o app cria, desde o início da execução:
+- `r`: o corpo da resposta (texto);
+- `r_ok`: `true` quando o status é 2xx;
+- `r_status`: o status HTTP, ou `0` em erro de rede;
+- `r_pendente`: vira `true` no instante do disparo (ainda dentro do bloco que definiu a variável) e `false` quando a resposta chega.
+
+Regras:
+- Espere a resposta com `WaitUntil` em `"!r_pendente"`, depois confira `r_ok`.
+- Leia campos com `json(r, "/logradouro")` ou `json(r, "/itens/0/preco")` (JSON Pointer). Texto, número e booleano voltam como valores; objeto e lista voltam como texto JSON; campo ausente, `null` ou `r` vazio voltam como `""`.
+- `when.OnSet` não pode conter a própria variável de resultado (nem `r_ok`, `r_status`, `r_pendente`).
+- Respostas não disparam integrações. Para encadear, defina uma variável com `SetVar` depois da resposta.
+- Só valem as integrações do script que está rodando; as de scripts chamados com `Call` ficam inativas.
+- Parar o script descarta as respostas pendentes e não roda o `"OnEnd"`.
+- Os erros (rede, status fora de 2xx, `{expr}` inválida) vão para o log e não param o fluxo.
+- O HTTPS usa os certificados e o proxy do Windows.
+
+Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
+
+```json
+{
+  "name": "Consulta CEP",
+  "target": { "exe": "Notepad.exe", "title": "*Bloco de Notas*" },
+  "integrations": [{
+    "name": "ViaCEP",
+    "when": { "OnSet": ["cep"] },
+    "dest": { "Http": { "method": "GET", "url": "https://viacep.com.br/ws/{cep}/json/", "headers": [], "timeout_ms": 10000 } },
+    "payload": { "Json": ["cep"] },
+    "result": "endereco"
+  }, {
+    "name": "Relatório",
+    "when": "OnEnd",
+    "dest": { "Http": { "method": "POST", "url": "https://exemplo.com/api/relatorio", "headers": [["Authorization", "Bearer {token}"]], "timeout_ms": 5000 } },
+    "payload": { "Text": "cep {cep}: {rua}" },
+    "result": null
+  }],
+  "blocks": [
+    { "SetVar": { "name": "token", "expr": "\"abc123\"" } },
+    { "SetVar": { "name": "rua", "expr": "\"\"" } },
+    { "SetVar": { "name": "cep", "expr": "\"01001000\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!endereco_pendente" }, "negate": false }, "timeout_ms": "15000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "rua", "expr": "json(endereco, \"/logradouro\")" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "endereco_ok && rua != \"\"" }, "negate": false },
+        "then": [ { "Type": { "text": "Rua: {rua}" } } ],
+        "else_": [ { "Log": { "text": "CEP não encontrado (status {endereco_status})" } } ] } }
+  ]
+}
+```
 
 ### Teclas (`vk`, decimal)
 

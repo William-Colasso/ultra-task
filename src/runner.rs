@@ -61,6 +61,8 @@ pub struct Interp<'a> {
     pub trace: bool,
     depth: u32,
     last_warn: String,
+    /// Integrações do script de cima (as de scripts chamados com Chamar não entram).
+    integ: Option<crate::integrations::engine::Engine>,
 }
 
 fn jit(v: i64, j: u32) -> i64 {
@@ -85,7 +87,45 @@ impl<'a> Interp<'a> {
                 Ok(Value::Boolean(t[0].as_string()?.to_lowercase().contains(&t[1].as_string()?.to_lowercase())))
             }),
         );
-        Interp { io, vars, stop, scripts, speed, log, dbg, trace: false, depth: 0, last_warn: String::new() }
+        crate::integrations::register_functions(&mut vars);
+        Interp { io, vars, stop, scripts, speed, log, dbg, trace: false, depth: 0, last_warn: String::new(), integ: None }
+    }
+
+    /// Liga as integrações da execução e cria as variáveis de resultado.
+    pub fn start_integrations(&mut self, list: &[crate::integrations::Integration]) {
+        if list.is_empty() {
+            return;
+        }
+        let now = self.io.now_ms();
+        self.integ = Some(crate::integrations::engine::Engine::new(list, &mut self.vars, now));
+        self.snapshot_vars();
+    }
+
+    /// Respostas que chegaram + gatilhos "a cada N s".
+    fn pump_integrations(&mut self) {
+        let Some(e) = self.integ.as_mut() else { return };
+        let now = self.io.now_ms();
+        if e.pump(&mut self.vars, now, &mut *self.log) {
+            self.snapshot_vars();
+        }
+    }
+
+    fn var_set(&mut self, name: &str) {
+        if let Some(e) = self.integ.as_mut() {
+            e.on_set(name.trim(), &mut self.vars, &mut *self.log);
+        }
+    }
+
+    /// Gatilhos "ao terminar"; não roda se o usuário parou (Parar descarta as respostas).
+    pub fn finish_integrations(&mut self) {
+        if self.stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Some(e) = self.integ.as_mut()
+            && e.finish(&mut self.vars, &mut *self.log, self.stop)
+        {
+            self.snapshot_vars();
+        }
     }
 
     fn snapshot_vars(&self) {
@@ -112,6 +152,7 @@ impl<'a> Interp<'a> {
         let t0 = self.io.now_ms();
         while self.dbg.paused.load(Ordering::Relaxed) {
             self.check()?;
+            self.pump_integrations();
             self.io.sleep(50);
         }
         Ok(self.io.now_ms() - t0)
@@ -160,6 +201,7 @@ impl<'a> Interp<'a> {
     fn sleep_until(&mut self, end: u64) -> R {
         loop {
             self.check()?;
+            self.pump_integrations();
             let now = self.io.now_ms();
             if now >= end {
                 return Ok(());
@@ -176,6 +218,7 @@ impl<'a> Interp<'a> {
     pub fn run_blocks(&mut self, blocks: &[Block]) -> R {
         for b in blocks {
             self.check()?;
+            self.pump_integrations();
             self.wait_if_paused()?;
             let summary = b.summary();
             if self.trace {
@@ -288,11 +331,13 @@ impl<'a> Interp<'a> {
             Block::SetVar { name, expr } => {
                 let v = self.eval(expr)?;
                 self.set_var(name, v)?;
+                self.var_set(name);
                 self.snapshot_vars();
             }
             Block::OcrToVar { name, region } => {
                 let t = self.io.ocr(*region)?;
                 self.set_var(name, Value::String(t.trim().into()))?;
+                self.var_set(name);
                 self.snapshot_vars();
             }
             Block::Log { text } => {
@@ -605,8 +650,9 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
             let r = {
                 let mut it = Interp::new(&mut io, &stop, &all, script.speed, &mut log_fn, &dbg);
                 it.trace = script.trace;
+                it.start_integrations(&script.integrations);
                 let mut n = 0u32;
-                loop {
+                let r = loop {
                     n += 1;
                     set(&if script.repeat == 1 { "Rodando".to_string() } else { format!("Rodando (volta {n})") });
                     if let Err(h) = it.run_blocks(&script.blocks) {
@@ -615,7 +661,12 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
                     if script.repeat != 0 && n >= script.repeat {
                         break Ok(());
                     }
+                };
+                if script.integrations.iter().any(|i| i.when == crate::integrations::When::OnEnd) {
+                    set("Aguardando integrações (ao terminar)");
                 }
+                it.finish_integrations();
+                r
             };
             io.inj.release_all();
             r
