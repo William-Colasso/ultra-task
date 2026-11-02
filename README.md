@@ -66,7 +66,7 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
   - jogos com DirectInput/RawInput;
   - apps que checam a posição real do cursor (Chromium/Electron e o próprio egui/winit);
   - janelas elevadas (nesse caso, use "Reiniciar como administrador").
-- Combinações com Ctrl/Alt/Shift no Segundo plano são instáveis (`GetKeyState` reflete o teclado real).
+- Combinações com Ctrl/Alt/Shift no Segundo plano: o estado dos modificadores é falsificado só para a thread do alvo (`GetKeyState`). Apps que leem o teclado com `GetAsyncKeyState` ou RawInput continuam vendo o teclado real e ignoram o modificador. Se o alvo não responde, a combinação não é enviada e o log avisa.
 - Jogos com mouse relativo (câmera FPS) podem não girar com movimentos absolutos.
 - Pixel e OCR no Segundo plano usam `PrintWindow`. Jogos DirectX podem devolver uma imagem preta (no modo Foco funciona).
 - Jogos online com anti-cheat podem detectar input simulado e banir a conta.
@@ -74,5 +74,5 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 ## Testes
 ```bash
 cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR) e registro numa chave temporária do HKCU
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, Ctrl+S em segundo plano, alvo travado) e registro numa chave temporária do HKCU
 ```

@@ -290,11 +290,13 @@ pub struct Injector {
     keys: Vec<(u16, u16, bool)>,
     last_child: Hwnd,
     last_pos: (i32, i32),
+    /// Avisos para o log da execução (ex.: combinação não enviada a um alvo travado).
+    pub notes: Vec<String>,
 }
 
 impl Injector {
     pub fn new(top: Hwnd, mode: Mode, simulate_focus: bool) -> Self {
-        Injector { top, mode, simulate_focus, buttons: vec![], keys: vec![], last_child: 0, last_pos: (0, 0) }
+        Injector { top, mode, simulate_focus, buttons: vec![], keys: vec![], last_child: 0, last_pos: (0, 0), notes: vec![] }
     }
 
     pub fn prepare(&mut self) {
@@ -421,8 +423,23 @@ impl Injector {
                             (true, true) => WM_SYSKEYDOWN,
                             (false, true) => WM_SYSKEYUP,
                         };
-                        unsafe {
-                            let _ = PostMessageW(Some(self.focus_target()), msg, WPARAM(vk as usize), LPARAM(key_lparam(scan, ext, !down, alt)));
+                        let dest = self.focus_target();
+                        let post = || unsafe {
+                            let _ = PostMessageW(Some(dest), msg, WPARAM(vk as usize), LPARAM(key_lparam(scan, ext, !down, alt)));
+                        };
+                        // Ticket 14: com Ctrl/Alt/Shift presos, o alvo precisa vê-los em GetKeyState.
+                        let held = crate::bgkeys::held_mods(self.keys.iter().map(|k| (k.0, k.2)));
+                        match crate::bgkeys::plan(vk, held, || crate::bgkeys::is_hung(dest)) {
+                            crate::bgkeys::KeyPath::Plain => post(),
+                            crate::bgkeys::KeyPath::Forge(m) => {
+                                if let Err(e) = crate::bgkeys::post_with_mods(dest, m, post) {
+                                    self.notes.push(format!("aviso: {} enviado sem modificadores: {e}", crate::bgkeys::combo_name(m, vk)));
+                                    post();
+                                }
+                            }
+                            crate::bgkeys::KeyPath::Hung => {
+                                self.notes.push(format!("aviso: a janela-alvo não responde; {} não foi enviado", crate::bgkeys::combo_name(held, vk)));
+                            }
                         }
                     }
                     Mode::Focus => {

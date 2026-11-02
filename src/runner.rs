@@ -470,9 +470,21 @@ struct WinIo {
     ocr_scale: u32,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<String>>,
+    /// Escreve no log da execução (avisos do Injector e da captura).
+    say: Box<dyn Fn(String)>,
+    last_note: String,
 }
 
 impl WinIo {
+    fn flush_notes(&mut self) {
+        for n in std::mem::take(&mut self.inj.notes) {
+            if n != self.last_note {
+                (self.say)(n.clone());
+                self.last_note = n;
+            }
+        }
+    }
+
     /// Focus mode: while the user is touching mouse/keyboard, release everything and wait
     /// until they've been idle for `idle_ms`. Paused time is excluded from the timeline.
     fn gate(&mut self) -> R {
@@ -511,6 +523,7 @@ impl Io for WinIo {
         self.gate()?;
         self.alive()?;
         self.inj.send(ev);
+        self.flush_notes();
         Ok(())
     }
     fn type_text(&mut self, s: &str) -> R {
@@ -599,6 +612,14 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
                 ocr_scale,
                 stop: stop.clone(),
                 status: status.clone(),
+                say: {
+                    let (log, name, wake) = (log.clone(), script.name.clone(), wake.clone());
+                    Box::new(move |m| {
+                        let _ = log.send(format!("[{name}] {m}"));
+                        wake();
+                    })
+                },
+                last_note: String::new(),
             };
             io.inj.prepare();
             let mut log_fn = |m: String| say(m);
