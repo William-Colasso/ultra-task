@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bgkeys;
 mod catalog;
 mod cola;
 mod editor;
@@ -13,6 +14,7 @@ mod tree;
 mod ui;
 mod uia;
 mod uia_rec;
+mod wgc;
 mod win;
 
 use std::sync::Arc;

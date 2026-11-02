@@ -585,11 +585,37 @@ struct WinIo {
     ocr_scale: u32,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<String>>,
+    /// Escreve no log da execução (avisos do Injector e da captura).
+    say: Box<dyn Fn(String)>,
+    last_note: String,
+    /// Segundo plano: PrintWindow, trocando para Windows Graphics Capture se vier de uma cor só.
+    cap: crate::wgc::BgCapture,
     /// Started on first use; UIA calls never run on this run's thread itself (timeouts).
     uia: uia::Worker<uia::Ctx>,
 }
 
 impl WinIo {
+    fn capture(&mut self) -> R<win::Image> {
+        if self.inj.mode == Mode::Focus {
+            return Ok(win::capture_client(self.inj.top, Mode::Focus)?);
+        }
+        let now = self.start.elapsed().as_millis() as u64;
+        let (img, note) = self.cap.capture(self.inj.top, now)?;
+        if let Some(n) = note {
+            (self.say)(n);
+        }
+        Ok(img)
+    }
+
+    fn flush_notes(&mut self) {
+        for n in std::mem::take(&mut self.inj.notes) {
+            if n != self.last_note {
+                (self.say)(n.clone());
+                self.last_note = n;
+            }
+        }
+    }
+
     /// Focus mode: while the user is touching mouse/keyboard, release everything and wait
     /// until they've been idle for `idle_ms`. Paused time is excluded from the timeline.
     fn gate(&mut self) -> R {
@@ -628,6 +654,7 @@ impl Io for WinIo {
         self.gate()?;
         self.alive()?;
         self.inj.send(ev);
+        self.flush_notes();
         Ok(())
     }
     fn type_text(&mut self, s: &str) -> R {
@@ -637,11 +664,11 @@ impl Io for WinIo {
         Ok(())
     }
     fn pixel(&mut self, x: i32, y: i32) -> R<[u8; 3]> {
-        let img = win::capture_client(self.inj.top, self.inj.mode)?;
+        let img = self.capture()?;
         img.pixel(x, y).ok_or_else(|| Halt::Error(format!("pixel ({x},{y}) fora da janela")))
     }
     fn ocr(&mut self, r: Region) -> R<String> {
-        let img = win::capture_client(self.inj.top, self.inj.mode)?;
+        let img = self.capture()?;
         Ok(win::ocr(&img.crop(r).scale(self.ocr_scale))?)
     }
     fn window_exists(&mut self) -> bool {
@@ -733,6 +760,15 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
                 ocr_scale,
                 stop: stop.clone(),
                 status: status.clone(),
+                say: {
+                    let (log, name, wake) = (log.clone(), script.name.clone(), wake.clone());
+                    Box::new(move |m| {
+                        let _ = log.send(format!("[{name}] {m}"));
+                        wake();
+                    })
+                },
+                last_note: String::new(),
+                cap: Default::default(),
                 uia: uia::session(),
             };
             io.inj.prepare();

@@ -88,13 +88,13 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
   - jogos com DirectInput/RawInput;
   - apps que checam a posição real do cursor (Chromium/Electron e o próprio egui/winit);
   - janelas elevadas (nesse caso, use "Reiniciar como administrador").
-- Combinações com Ctrl/Alt/Shift no Segundo plano são instáveis (`GetKeyState` reflete o teclado real).
+- Combinações com Ctrl/Alt/Shift no Segundo plano: o estado dos modificadores é falsificado só para a thread do alvo (`GetKeyState`). Apps que leem o teclado com `GetAsyncKeyState` ou RawInput continuam vendo o teclado real e ignoram o modificador. Se o alvo não responde, a combinação não é enviada e o log avisa.
 - Jogos com mouse relativo (câmera FPS) podem não girar com movimentos absolutos.
-- Pixel e OCR no Segundo plano usam `PrintWindow`. Jogos DirectX podem devolver uma imagem preta (no modo Foco funciona).
+- Pixel e OCR no Segundo plano usam `PrintWindow`. Se a imagem vier toda preta (ou de uma cor só), como em jogos DirectX e alguns Chromium encobertos, a execução passa a usar o Windows Graphics Capture para aquela janela até o fim (Windows 10 1903 ou mais novo). No Windows 10 pode aparecer uma borda amarela na janela capturada; onde o sistema deixa, ela é desligada. Sem o Windows Graphics Capture (Windows 7/8), fica a imagem preta (no modo Foco funciona). Janela minimizada não é capturada: a condição dá falso com aviso.
 - Jogos online com anti-cheat podem detectar input simulado e banir a conta.
 
 ## Testes
 ```bash
 cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local), UIA (árvore falsa)
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, UI Automation numa janela própria), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, UI Automation numa janela própria, Ctrl+S em segundo plano, alvo travado, captura WGC com a janela coberta), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
 ```

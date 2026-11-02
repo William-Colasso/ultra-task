@@ -1386,6 +1386,7 @@ mod tests {
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
         let src = [
             include_str!("catalog.rs"),
+            include_str!("bgkeys.rs"),
             include_str!("cola.rs"),
             include_str!("editor.rs"),
             include_str!("humanmouse.rs"),
@@ -1402,6 +1403,7 @@ mod tests {
             include_str!("ui.rs"),
             include_str!("uia.rs"),
             include_str!("uia_rec.rs"),
+            include_str!("wgc.rs"),
         ]
         .concat();
         let mut chars = std::collections::BTreeSet::new();
