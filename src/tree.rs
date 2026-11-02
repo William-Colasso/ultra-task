@@ -163,6 +163,25 @@ pub fn move_block(root: &mut Vec<Block>, from: &Pos, to: &Pos) -> bool {
     insert(root, &to, b)
 }
 
+/// Puts the block at `pos` inside `container` (at the start of its first child list),
+/// and the container where the block was.
+pub fn wrap(root: &mut Vec<Block>, pos: &Pos, mut container: Block) -> bool {
+    let Some(&first) = slots(&container).first() else { return false };
+    let Some(l) = list_mut(root, &pos.list) else { return false };
+    if pos.index >= l.len() {
+        return false;
+    }
+    let inner = std::mem::replace(&mut l[pos.index], Block::Stop);
+    slot_mut(&mut container, first).expect("slots() lists it").insert(0, inner);
+    l[pos.index] = container;
+    true
+}
+
+/// How many blocks there are inside `b`, at any depth.
+pub fn count_inside(b: &Block) -> usize {
+    slots(b).iter().filter_map(|&s| slot(b, s)).flatten().map(|c| 1 + count_inside(c)).sum()
+}
+
 /// Editor grouping (palette sections and card colors).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Category {
@@ -174,6 +193,8 @@ pub enum Category {
 }
 
 impl Category {
+    pub const ALL: [Category; 5] = [Category::Action, Category::Wait, Category::Control, Category::Vars, Category::Debug];
+
     pub fn label(self) -> &'static str {
         match self {
             Category::Action => "Ação",
@@ -340,6 +361,36 @@ mod tests {
         assert_eq!(remove(&mut t, &Pos::new(&[(0, Slot::Body)], 2)), Some(log("b")));
         assert!(splice(&mut t, &a, vec![log("x"), log("y")]));
         assert_eq!(names(slot(&t[0], Slot::Body).unwrap()), ["x", "y", "a"]);
+    }
+
+    #[test]
+    fn wrap_keeps_position() {
+        let mut t = vec![log("a"), rep(vec![log("in1"), log("in2")]), log("c")];
+        // Wrap a nested block in Se: it goes to "então", and Se takes its place.
+        let in2 = Pos::new(&[(1, Slot::Body)], 1);
+        assert!(wrap(&mut t, &in2, iff(vec![], vec![])));
+        let body = slot(&t[1], Slot::Body).unwrap();
+        assert_eq!(names(body), ["in1", "Se"]);
+        assert_eq!(names(slot(&body[1], Slot::Then).unwrap()), ["in2"]);
+        assert!(slot(&body[1], Slot::Else).unwrap().is_empty());
+        // Wrap a top-level block in Enquanto: it goes to the body.
+        let w = Block::While { cond: Condition::default(), body: vec![] };
+        assert!(wrap(&mut t, &top(2), w));
+        assert_eq!(names(&t), ["a", "Repetir", "Enquanto"]);
+        assert_eq!(names(slot(&t[2], Slot::Body).unwrap()), ["c"]);
+        // Not a container / missing block: nothing changes.
+        let before = t.clone();
+        assert!(!wrap(&mut t, &top(0), log("x")));
+        assert!(!wrap(&mut t, &top(9), rep(vec![])));
+        assert_eq!(t, before);
+    }
+
+    #[test]
+    fn counts_blocks_inside() {
+        let b = iff(vec![log("a"), rep(vec![log("b"), log("c")])], vec![log("d")]);
+        assert_eq!(count_inside(&b), 5);
+        assert_eq!(count_inside(&rep(vec![])), 0);
+        assert_eq!(count_inside(&log("x")), 0);
     }
 
     #[test]

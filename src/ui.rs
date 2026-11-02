@@ -690,9 +690,12 @@ impl App {
         let names: Vec<String> = self.scripts.iter().map(|s| s.name.clone()).collect();
         match self.tab {
             Tab::Blocks => {
+                egui::Panel::left("palette").resizable(false).default_size(170.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| editor::palette_ui(ui, &mut self.scripts[i].blocks));
+                });
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     let mut ec = EditCtx { names: &names, pick_req: &mut self.pick_req, pick_result: &mut self.pick_result };
-                    blocks_ui(ui, &mut self.scripts[i].blocks, Id::unique("blocks"), &mut ec);
+                    blocks_ui(ui, &mut self.scripts[i].blocks, Id::unique(("blocks", &names[i])), &mut ec);
                 });
             }
             Tab::Config => egui::ScrollArea::vertical().show(ui, |ui| self.config_ui(ui, i)).inner,
