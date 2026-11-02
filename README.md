@@ -173,7 +173,13 @@ Ele não lê nem grava os ajustes nem a pasta de scripts do UltraTask, e não co
 ### Integrações
 A aba **Integrações** de cada script liga o fluxo a serviços externos sem travá-lo. Cada integração tem:
 - **gatilho**: quando um bloco define certas variáveis, a cada N segundos, ou ao terminar a execução;
-- **destino**: por enquanto REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
+- **destino**:
+  - REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
+  - Arquivo: acrescenta, sobrescreve ou lê um arquivo de texto (a leitura vai para a variável de resultado). O caminho aceita `{…}`, um caminho relativo parte da pasta de dados (a do exe, ou `%LOCALAPPDATA%\UltraTask` quando a do exe não aceita escrita; o mesmo vale para o SQLite e para a pasta de trabalho do Comando), e as pastas que faltam são criadas. JSON grava uma linha por envio, CSV grava o cabeçalho quando o arquivo é novo, e texto vai como está;
+  - Comando: roda um programa sem janela de console, com argumentos que aceitam `{…}`. O envio vai pelo stdin, o stdout vai para a variável de resultado e o código de saída para `r_status`; se o timeout estoura, o processo é encerrado;
+  - Área de transferência: escreve o envio ou lê o texto atual para a variável de resultado;
+  - SQLite: um banco num arquivo `.db` (criado se faltar), com o SQLite embutido no exe. O SQL usa `:variavel`, ligado ao valor da variável com o tipo preservado e sem interpolação de texto (sem injeção). Um SELECT põe as linhas em JSON na variável de resultado (`json(r, "/0/nome")`); os outros comandos põem as linhas afetadas em `r_status`;
+  - ODBC: bancos já instalados no PC (SQL Server, MySQL, PostgreSQL, Access…) pelo gerenciador ODBC do Windows, com um DSN ou uma string de conexão. O SQL e o resultado seguem o mesmo contrato do SQLite. **Atenção:** uma senha na string de conexão (`PWD=…`) fica em texto puro no JSON do script; prefira um DSN ou a autenticação do Windows (`Trusted_Connection=yes`);
 - **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
 - **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
 
@@ -201,7 +207,7 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 ## Testes
 ```bash
 cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local), UIA (árvore falsa), CDP (tradução, coordenadas, lançamento, cliente contra servidor falso)
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, UI Automation numa janela própria, Ctrl+S em segundo plano, alvo travado, captura WGC com a janela coberta), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR, UI Automation numa janela própria, Ctrl+S em segundo plano, alvo travado, captura WGC com a janela coberta), registro numa chave temporária do HKCU, HTTPS real (viacep.com.br), área de transferência, arquivo somente leitura e banco ODBC real (defina ULTRATASK_ODBC_TESTE com um DSN ou uma string de conexão)
 # CDP contra Chromium de verdade (um por porta, abertos com --remote-debugging-port e título "UT..."):
 ULTRATASK_CDP_PORTS=9331,9332,9333 cargo test -- --ignored cdp_real
 ```

@@ -1,6 +1,7 @@
 //! Destino REST. O transporte é o WinHTTP do próprio Windows: usa o repositório de
 //! certificados e o proxy do sistema, e não traz dependência nova nem toolchain C.
-use super::{Body, Destination, Job, Outcome, check_interp};
+use super::{Body, Destination, Job, Outcome, check_interp, eval_text};
+use evalexpr::HashMapContext;
 use crate::model::interpolate;
 use serde::{Deserialize, Serialize};
 use windows::Win32::Networking::WinHttp::*;
@@ -85,7 +86,8 @@ impl Destination for HttpDest {
         }
     }
 
-    fn prepare(&self, body: Body, eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String> {
+    fn prepare(&self, body: Body, vars: &HashMapContext) -> Result<Job, String> {
+        let eval = &mut |e: &str| eval_text(vars, e);
         let req = self.request(body, eval)?;
         Ok(Box::new(move || send(&req)))
     }

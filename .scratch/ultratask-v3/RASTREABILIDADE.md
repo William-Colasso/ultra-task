@@ -17,10 +17,10 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 | [07-builds-32-bits-e-arm64](issues/07-builds-32-bits-e-arm64.md) | ready-for-agent | | |
 | [08-windows-7-e-8](issues/08-windows-7-e-8.md) | ready-for-agent | | |
 | [09-integracoes-rest](issues/09-integracoes-rest.md) | needs-local-verification | 905c4d8, 9fca086 | Aba Integrações (criar/editar/remover) e painel Execuções na tela; HTTPS real (`https_real_viacep`) |
-| [10-integracao-arquivo](issues/10-integracao-arquivo.md) | ready-for-agent | | |
-| [11-integracao-sqlite](issues/11-integracao-sqlite.md) | ready-for-agent | | |
-| [12-integracao-odbc](issues/12-integracao-odbc.md) | ready-for-agent | | |
-| [13-integracao-comando-e-clipboard](issues/13-integracao-comando-e-clipboard.md) | ready-for-agent | | |
+| [10-integracao-arquivo](issues/10-integracao-arquivo.md) | needs-local-verification | f8627fc, 8c7bc2b, 26d083f | Build MSVC/release; aparência da aba; erro de arquivo somente leitura (teste ignorado no Wine) |
+| [11-integracao-sqlite](issues/11-integracao-sqlite.md) | needs-local-verification | 563429e, 1318cd0, 26d083f | Build MSVC/release (SQLite `bundled` compilado com cl.exe); aparência da aba |
+| [12-integracao-odbc](issues/12-integracao-odbc.md) | needs-local-verification | f9e249b, 364f9af, 26d083f | Teste real com Access/LocalDB via `ULTRATASK_ODBC_TESTE`; build MSVC/release |
+| [13-integracao-comando-e-clipboard](issues/13-integracao-comando-e-clipboard.md) | needs-local-verification | 874eb55, cdb82e3, 26d083f | Ida e volta na área de transferência (teste ignorado); build MSVC/release |
 | [14-segundo-plano-modificadores](issues/14-segundo-plano-modificadores.md) | needs-local-verification | 029b940, 6a669f9, 951c509 | Ctrl+S 20/20 no Notepad coberto; Ctrl real nunca pressionado; alvo travado; E2E antigo |
 | [15-captura-wgc](issues/15-captura-wgc.md) | needs-local-verification | b873562, 8efcc8e, 951c509 | Pixel/OCR no Chrome e jogo DirectX cobertos; coberta ≈ visível (teste ignorado) |
 | [16-blocos-uia](issues/16-blocos-uia.md) | needs-local-verification | e19e993, b293069, 303b138 | 3 alvos cobertos (WinForms/Notepad, WPF, Electron) com UIA real; erro/clique de reserva reais; `real_uia_on_own_window` |

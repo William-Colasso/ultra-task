@@ -237,14 +237,14 @@ Uma integração envia dados para fora **em paralelo**: os blocos seguintes não
 |---|---|
 | `name` | texto não vazio; aparece no log |
 | `when` | `{"OnSet": ["a", "b"]}`: quando um bloco `SetVar`/`OcrToVar` define uma dessas variáveis. `{"Every": {"s": 5.0}}`: a cada N segundos enquanto o script roda (pula se o envio anterior ainda não voltou). `"OnEnd"`: uma vez depois do último bloco; a execução espera a resposta até `timeout_ms` |
-| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string) |
+| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string). Outros destinos: veja *Outros destinos* abaixo |
 | `payload` | `{"Json": ["a", "b"]}` envia `{"a": …, "b": …}` (números continuam números). `{"Csv": ["a", "b"]}` envia uma linha CSV. `{"Text": "pedido {n}"}` envia o texto interpolado. Em `GET` o corpo não vai: ponha os valores na `url` |
 | `result` | nome de variável ou `null` |
 
 Para `"result": "r"`, o app cria, desde o início da execução:
 - `r`: o corpo da resposta (texto);
 - `r_ok`: `true` quando o status é 2xx;
-- `r_status`: o status HTTP, ou `0` em erro de rede;
+- `r_status`: o status HTTP, ou `0` em erro de rede (cada destino em *Outros destinos* diz o que vai aqui);
 - `r_pendente`: vira `true` no instante do disparo (ainda dentro do bloco que definiu a variável) e `false` quando a resposta chega.
 
 Regras:
@@ -286,6 +286,152 @@ Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
         "cond": { "kind": { "Expr": "endereco_ok && rua != \"\"" }, "negate": false },
         "then": [ { "Type": { "text": "Rua: {rua}" } } ],
         "else_": [ { "Log": { "text": "CEP não encontrado (status {endereco_status})" } } ] } }
+  ]
+}
+```
+
+#### Outros destinos
+
+Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em erro, `r_ok` fica `false`, `r_status` fica `0` e a mensagem vai para o log.
+
+**Arquivo** (`File`): `{"File": {"path": "dados/{dia}.csv", "mode": "Append"}}`.
+- `path` aceita `{expr}`; um caminho relativo parte da pasta de dados: a pasta do `ultratask.exe` (ou do `.exe` exportado), ou `%LOCALAPPDATA%\UltraTask` quando ela não aceita escrita (a mesma pasta de `scripts\`). As pastas que faltam são criadas.
+- `mode`: `"Append"` (acrescenta no fim), `"Overwrite"` (troca o conteúdo) ou `"Read"` (lê o arquivo inteiro para `r`; o `payload` é ignorado).
+- Ao gravar: `Json` grava uma linha por envio; `Csv` grava a linha com os nomes das variáveis quando o arquivo é novo (ou vazio) e depois uma linha por envio; `Text` grava o texto como está, sem quebra de linha. As linhas de `Json` e `Csv` terminam em CRLF.
+- `r_status`: bytes gravados ou lidos. `r`: o conteúdo lido (vazio ao gravar).
+
+```json
+{
+  "name": "Planilha de pedidos",
+  "integrations": [{
+    "name": "Grava pedido",
+    "when": { "OnSet": ["pedido"] },
+    "dest": { "File": { "path": "relatorios/pedidos.csv", "mode": "Append" } },
+    "payload": { "Csv": ["pedido", "cliente", "valor"] },
+    "result": null
+  }, {
+    "name": "Lê pedidos",
+    "when": "OnEnd",
+    "dest": { "File": { "path": "relatorios/pedidos.csv", "mode": "Read" } },
+    "payload": { "Text": "" },
+    "result": "planilha"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "cliente", "expr": "\"Ana\"" } },
+    { "SetVar": { "name": "valor", "expr": "19.9" } },
+    { "SetVar": { "name": "pedido", "expr": "1001" } }
+  ]
+}
+```
+
+**Comando** (`Command`): `{"Command": {"program": "cmd", "args": ["/c", "echo {n}"], "timeout_ms": 10000}}`.
+- Roda o programa sem janela de console, com a pasta de dados como pasta de trabalho (veja o Arquivo). `program` (caminho ou nome no PATH) e cada item de `args` aceitam `{expr}`. Para um comando do `cmd`, ponha a linha inteira num só argumento depois de `"/c"`. Evite aspas dentro dos argumentos do `cmd`: o escape do Windows e o do `cmd` são diferentes.
+- O envio (`payload`) vai pelo **stdin**. O **stdout**, sem espaços nas pontas, vai para `r`; o **código de saída** vai para `r_status`; `r_ok` é `true` só com código 0 (outro código vai para o log, com o stderr).
+- Se passar de `timeout_ms`, o processo (e o que ele abriu) é encerrado e o log diz `tempo esgotado`.
+- Cuidado: um valor de variável dentro de `args` vira parte da linha de comando. Para dados vindos de fora, prefira mandar pelo stdin.
+
+**Área de transferência** (`Clipboard`): `{"Clipboard": {"mode": "Write"}}`.
+- `"Write"` põe o envio na área de transferência (como texto). `"Read"` lê o texto atual para `r` (o `payload` é ignorado; vazio quando não há texto).
+- `r_status`: número de caracteres escritos ou lidos.
+
+```json
+{
+  "name": "Procura e copia",
+  "integrations": [{
+    "name": "findstr",
+    "when": { "OnSet": ["texto"] },
+    "dest": { "Command": { "program": "cmd", "args": ["/c", "findstr /n {chave}"], "timeout_ms": 5000 } },
+    "payload": { "Text": "{texto}" },
+    "result": "achou"
+  }, {
+    "name": "Copia",
+    "when": { "OnSet": ["achou_txt"] },
+    "dest": { "Clipboard": { "mode": "Write" } },
+    "payload": { "Text": "{achou_txt}" },
+    "result": null
+  }],
+  "blocks": [
+    { "SetVar": { "name": "chave", "expr": "\"pedido\"" } },
+    { "SetVar": { "name": "texto", "expr": "\"pedido 42\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!achou_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "achou_ok" }, "negate": false },
+        "then": [ { "SetVar": { "name": "achou_txt", "expr": "achou" } } ],
+        "else_": [ { "Log": { "text": "não achou (código {achou_status})" } } ] } }
+  ]
+}
+```
+
+**SQLite** (`Sqlite`): `{"Sqlite": {"path": "dados.db", "sql": "SELECT nome FROM clientes WHERE id = :id", "timeout_ms": 10000}}`.
+- `path`: o arquivo `.db`, criado se faltar (com as pastas). Aceita `{expr}`; relativo parte da pasta de dados (veja o Arquivo). O SQLite vai embutido no exe (também no `.exe` exportado).
+- `sql`: **um** comando. Os valores entram como `:variavel`, ligados ao valor atual da variável com o tipo preservado (inteiro, número, texto; booleano vira 1/0). O `sql` **não** aceita `{…}` e nunca recebe texto colado, então aspas e `;` nos valores não quebram nem injetam SQL. Não use `?`.
+- SELECT (ou qualquer comando que devolve colunas): `r` recebe as linhas como lista JSON de objetos, ex.: `[{"id":1,"nome":"Ana"}]`; leia com `json(r, "/0/nome")`. `r_status` = número de linhas. NULL vira `null` (e `json()` devolve `""`).
+- Outros comandos (INSERT, UPDATE, CREATE…): `r_status` (e `r`) = linhas afetadas.
+- Uma variável usada como `:variavel` precisa existir no instante do disparo; senão o envio falha e vai para o log.
+- Integrações diferentes gravando no mesmo arquivo esperam a vez (até `timeout_ms`), sem "database is locked".
+
+```json
+{
+  "name": "Cadastro local",
+  "integrations": [{
+    "name": "Tabela",
+    "when": { "OnSet": ["iniciar"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nome TEXT, saldo REAL)", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "tabela"
+  }, {
+    "name": "Insere",
+    "when": { "OnSet": ["nome"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "INSERT INTO clientes (nome, saldo) VALUES (:nome, :saldo)", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "ins"
+  }, {
+    "name": "Consulta",
+    "when": { "OnSet": ["buscar"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "SELECT id, nome, saldo FROM clientes WHERE nome = :buscar ORDER BY id DESC LIMIT 1", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "linhas"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "iniciar", "expr": "1" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!tabela_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "saldo", "expr": "10.5" } },
+    { "SetVar": { "name": "nome", "expr": "\"O'Brien; DROP TABLE clientes\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!ins_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "buscar", "expr": "nome" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!linhas_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "linhas_ok && linhas_status > 0" }, "negate": false },
+        "then": [ { "Log": { "text": "id {json(linhas, \"/0/id\")}, saldo {json(linhas, \"/0/saldo\")}" } } ],
+        "else_": [ { "Log": { "text": "não achou" } } ] } }
+  ]
+}
+```
+
+**ODBC** (`Odbc`): `{"Odbc": {"connection": "MeuBanco", "sql": "SELECT nome FROM clientes WHERE id = :id", "timeout_ms": 15000}}`.
+- Para bancos já instalados no PC (SQL Server, MySQL, PostgreSQL, Access…), pelo gerenciador ODBC do Windows. Precisa do driver ODBC do banco instalado.
+- `connection`: o nome de um DSN (configurado em "Fontes de dados ODBC" do Windows) ou uma string de conexão, ex.: `Driver={ODBC Driver 18 for SQL Server};Server=.;Database=loja;Trusted_Connection=yes;TrustServerCertificate=yes`. Vai como está: **não** aceita `{expr}`, porque as chaves fazem parte da sintaxe do ODBC.
+- **Senha**: uma senha na `connection` (`PWD=…`) fica em texto puro no JSON do script. Prefira um DSN com autenticação do Windows (`Trusted_Connection=yes`) ou guarde a senha no DSN.
+- `sql`, `:variavel`, `timeout_ms` e o resultado seguem o mesmo contrato do **SQLite**: SELECT ➜ `r` = lista JSON de objetos e `r_status` = número de linhas; outros comandos ➜ `r_status` = linhas afetadas. `DECIMAL`/`NUMERIC` viram número quando cabem; datas voltam como texto.
+- Falha de conexão (DSN inexistente, driver ausente, senha errada, servidor fora) vai para o log e deixa `r_ok` falso.
+
+```json
+{
+  "name": "Estoque no SQL Server",
+  "integrations": [{
+    "name": "Consulta estoque",
+    "when": { "OnSet": ["codigo"] },
+    "dest": { "Odbc": { "connection": "Driver={ODBC Driver 18 for SQL Server};Server=.;Database=loja;Trusted_Connection=yes;TrustServerCertificate=yes", "sql": "SELECT descricao, quantidade FROM produtos WHERE codigo = :codigo", "timeout_ms": 15000 } },
+    "payload": { "Json": [] },
+    "result": "produto"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "codigo", "expr": "\"A-100\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!produto_pendente" }, "negate": false }, "timeout_ms": "20000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "produto_ok && produto_status > 0" }, "negate": false },
+        "then": [ { "Type": { "text": "{json(produto, \"/0/descricao\")}: {json(produto, \"/0/quantidade\")}" } } ],
+        "else_": [ { "Log": { "text": "produto não encontrado ou banco fora do ar" } } ] } }
   ]
 }
 ```
