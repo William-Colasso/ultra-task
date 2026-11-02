@@ -4,7 +4,7 @@ UltraTask é um gravador e reprodutor de macros para Windows, inspirado no TinyT
 A diferença principal é que cada script roda **numa janela-alvo** e, no modo Segundo plano, não toma o seu mouse nem o teclado.
 
 ## Requisitos
-- Windows 10 ou 11 de 64 bits. Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
+- Windows 10 ou 11: x64, x86 (32 bits, roda também num Windows de 64 bits) ou ARM64, cada um com o seu exe (ver [Build](#build)). Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
   - Não depende do runtime do Visual C++ (o CRT vai embutido no exe) e só usa DLLs que vêm com o Windows.
   - Funciona sem placa de vídeo (VM, área de trabalho remota, Windows Sandbox sem vGPU). Se o OpenGL não abrir, o UltraTask se reabre sozinho com `--render-software`, que desenha a janela com Direct3D 12 por software (WARP, que vem no Windows). Esse argumento também pode ser passado à mão.
   - Os blocos e condições de OCR precisam de um idioma com OCR no Windows. Sem nenhum, eles falham com uma mensagem que diz como instalar: **Configurações > Hora e idioma > Idioma e região > Português (Brasil) > Opções de idioma > Reconhecimento óptico de caracteres**, ou, no PowerShell como administrador, `Add-WindowsCapability -Online -Name "Language.OCR~~~pt-BR~0.0.1.0"`.
@@ -19,6 +19,33 @@ cargo build --release
 ```
 
 O resultado é um único `target/release/ultratask.exe`. Os scripts ficam em `scripts\` ao lado do .exe, então dá para copiar a pasta e levar tudo junto.
+
+### x64, x86 e ARM64 de uma vez
+Nenhuma dependência compila código C, então basta o MSVC (o `link.exe` e as bibliotecas de cada arquitetura). Uma vez só:
+
+1. Instale os alvos do Rust:
+   ```powershell
+   rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
+   ```
+2. No **Visual Studio Installer**, em **Build Tools 2022 > Modificar > Componentes individuais**, marque **MSVC v143 - VS 2022 C++ x64/x86 build tools (mais recente)** (já vem com a carga "Desenvolvimento para desktop com C++") e **MSVC v143 - VS 2022 C++ ARM64/ARM64EC build tools (mais recente)**. Pela linha de comando, como administrador:
+   ```powershell
+   & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --passive
+   ```
+   O Windows SDK que já vem com os Build Tools traz as bibliotecas ARM64.
+
+Depois, o alias definido em `.cargo/config.toml` gera os três:
+
+```powershell
+cargo build-all
+```
+
+| Arquitetura | Exe |
+|---|---|
+| x64 | `target\x86_64-pc-windows-msvc\release\ultratask.exe` |
+| x86 (32 bits) | `target\i686-pc-windows-msvc\release\ultratask.exe` |
+| ARM64 | `target\aarch64-pc-windows-msvc\release\ultratask.exe` |
+
+Os três têm o CRT embutido e o mesmo fallback de renderização por software. O exe x86 leva um manifesto `asInvoker`, para que o Windows não desvie a gravação dos scripts para o `VirtualStore` quando ele estiver em Arquivos de Programas. Para testar o x86: `cargo test --target i686-pc-windows-msvc`.
 
 ## Uso rápido
 

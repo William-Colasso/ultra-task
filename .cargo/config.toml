@@ -3,3 +3,16 @@
 # msvcrt.dll, que vem no Windows.
 [target.'cfg(target_env = "msvc")']
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Ticket 07: o exe de 32 bits leva um manifesto com requestedExecutionLevel=asInvoker.
+# Sem ele, o Windows aplica a virtualização de arquivos do UAC a processos de 32 bits, e
+# gravar ao lado do exe em Arquivos de Programas "funcionaria" (indo parar em VirtualStore)
+# em vez de cair no %LOCALAPPDATA%\UltraTask do ticket 06. Os rustflags das tabelas cfg que
+# casam com o alvo se somam, então o +crt-static acima continua valendo.
+[target.'cfg(all(target_env = "msvc", target_arch = "x86"))']
+rustflags = ["-C", "link-arg=/MANIFEST:EMBED", "-C", "link-arg=/MANIFESTUAC:level='asInvoker'"]
+
+[alias]
+# Ticket 07: `cargo build-all` gera os exes de release x64, x86 (32 bits) e ARM64 em
+# target\<alvo>\release\ultratask.exe. Alvos e componente do VS Build Tools: ver README.
+build-all = "build --release --target x86_64-pc-windows-msvc --target i686-pc-windows-msvc --target aarch64-pc-windows-msvc"
