@@ -29,7 +29,10 @@ Um script do UltraTask é um arquivo JSON. Ele descreve a janela-alvo e uma árv
 ## Modos
 
 - `"Background"`: envia mensagens direto para a janela. O cursor real não se mexe e vários scripts rodam em paralelo. Serve para apps desktop clássicos (Win32, WinForms, WPF, Bloco de Notas, ERPs).
-- `"Focus"`: traz a janela para frente e usa o mouse/teclado reais (`SendInput` por scancode). Roda um script por vez. Serve para jogos, Chrome/Edge, apps Electron e qualquer app que ignore o modo Background. Combinações como Ctrl+S são confiáveis só neste modo.
+- `"Focus"`: traz a janela para frente e usa o mouse/teclado reais (`SendInput` por scancode). Roda um script por vez. Serve para jogos e qualquer app que ignore o modo Background. Combinações como Ctrl+S são confiáveis neste modo e no CDP.
+- **Navegador (CDP)**: preencha o campo `cdp` (veja *Modo Navegador (CDP)*); `mode` e `simulate_focus` passam a ser ignorados. O UltraTask abre o app e controla a página pelo Chrome DevTools Protocol, sem mexer no mouse/teclado reais, com a janela coberta e com várias instâncias em paralelo. Prefira este modo para Chrome, Edge, apps Electron e apps WebView2.
+
+Em qualquer modo, o bloco `Uia` (veja *Elementos (UIA)*) age direto num controle, sem mouse nem teclado. Ele roda em paralelo e com a janela coberta, inclusive em apps que ignoram o Background (Chromium 126+, Electron com acessibilidade, WPF, WinForms, UWP, Qt, egui). Prefira `Uia` a `Click` quando o controle tiver nome ou AutomationId.
 
 ## Referência
 
@@ -67,6 +70,7 @@ Campos omitidos usam o padrão; campos desconhecidos são **rejeitados**.
 | `trace` | registra cada bloco no log (debug) | `false` |
 | `human_mouse` | movimento humano do mouse: `Move`, `Click` e `Scroll` levam o ponteiro da posição atual até o alvo por uma curva com aceleração, freada e às vezes uma correção, em vez de saltar. O clique cai no ponto do bloco (± `jitter_px`). Vale nos dois modos; `Recording` não muda. Use `true` quando o app ou jogo estranha cursor que se teletransporta ou quando um arrasto (`Down` → `Move` → `Up`) precisa de movimentos intermediários | `false` |
 | `integrations` | chamadas REST em paralelo ao fluxo (veja *Integrações*) | `[]` |
+| `cdp` | liga o modo Navegador (CDP); veja abaixo. Omita nos outros modos | ausente |
 
 Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo Foco.
 
@@ -83,6 +87,26 @@ Exemplo de `human_mouse`: um arrasto no Paint que deixa um traço curvo, no modo
   ]
 }
 ```
+
+### Modo Navegador (CDP)
+
+```json
+"cdp": { "exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "args": "https://exemplo.com", "port": 0, "webview2": false, "keep_open": false }
+```
+
+| Campo | Significado | Padrão |
+|---|---|---|
+| `exe` | o programa que o UltraTask abre (`chrome.exe`, `msedge.exe`, o exe do app Electron ou WebView2). No JSON, `\\` em cada barra. `""` = conectar a um app já aberto com `--remote-debugging-port` na `port` | `""` |
+| `args` | resto da linha de comando (ex.: a URL); argumentos com espaço vão entre `\"...\"` | `""` |
+| `port` | `0` = porta livre a cada execução (permite várias instâncias). Obrigatória quando `exe` é `""` | `0` |
+| `webview2` | o app embute WebView2: a porta vai por `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | `false` |
+| `keep_open` | não fecha o app no fim (o perfil temporário fica no disco) | `false` |
+
+- A página é escolhida pelo `target.title`, comparado com o título da **página** (`document.title`), não com o da janela. No Chrome, use `"*Parte do título*"` em vez de `"Título - Google Chrome"`. `target` pode ser `null`: usa a primeira página.
+- Coordenadas continuam na área cliente da janela, como nos outros modos.
+- Com `exe` preenchido, `trigger` precisa ser `"Manual"`: cada execução abre o app de novo.
+- `Type` usa `Input.insertText`; `Key` aceita combinações (Ctrl `Down`, S `Press`, Ctrl `Up` = Ctrl+S). `Pixel`, `OcrContains` e `OcrToVar` usam a captura da página.
+- `human_mouse` e `integrations` valem também aqui: o trajeto humano vira uma sequência de eventos de mouse dentro da página. Blocos e condições `Uia` **não** funcionam neste modo: o bloco para com erro e a condição dá falso.
 
 ### Blocos
 
@@ -101,6 +125,7 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 { "While": { "cond": COND, "body": [] } }
 { "SetVar": { "name": "contador", "expr": "contador + 1" } }
 { "OcrToVar": { "name": "texto", "region": { "x": 10, "y": 10, "w": 200, "h": 30 } } }
+{ "Uia": { "elem": ELEM, "action": "Invoke", "timeout_ms": "5000", "fallback_click": false } }
 { "Call": { "script": "Login" } }
 { "Log": { "text": "contador = {contador}" } }
 "Breakpoint"
@@ -118,9 +143,12 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 - `WaitUntil`: confere a condição a cada 100 ms. `timeout_ms` é *expr*. `on_timeout`: `"Stop"` encerra com erro, `"Continue"` segue adiante.
 - `Repeat.times` é *expr*. `While` repete enquanto a condição for verdadeira.
 - `SetVar`: `name` é um identificador (letras, dígitos, `_`; não começa com dígito); `expr` é *expr*. `OcrToVar` guarda o texto lido (string, sem espaços nas pontas).
+- `Uia` age num elemento da janela-alvo pela UI Automation; veja *Elementos (UIA)*. Só `elem` e `action` precisam aparecer: `timeout_ms` vale `"5000"` e `fallback_click` vale `false` quando omitidos.
 - `Call` roda outro script da mesma pasta, pelo `name` dele, com a mesma janela e as mesmas variáveis.
 - `Breakpoint` pausa até o usuário clicar ▶ no painel de execuções, onde ele vê as variáveis. `Stop` encerra o script.
 - `Recording` é uma gravação feita pelo app. Copie-a de scripts existentes em vez de escrever à mão: `{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}}, …],"speed":1.0}}`.
+  - O campo opcional `elements` guarda o elemento UIA de cada clique gravado: `"elements":[{"event":1,"elem":ELEM,"action":"Invoke"}]`. `event` é o índice, em `events`, do botão pressionado (`{"Button":["Left",true,x,y]}`); `action` (`"Invoke"`, `"Toggle"` ou `"Select"`) só aparece quando o elemento pode ser acionado sem mouse. Gravações sem `elements` continuam válidas.
+  - A reprodução da gravação ignora `elements`. Ele só serve ao **Explodir em passos** do app: cliques esquerdos simples com `action` viram blocos `Uia` com `"fallback_click": true` (clique no mesmo ponto se o elemento sumir); os demais continuam `Click`. Não edite `elements` à mão.
 
 ### Condições (`COND`)
 
@@ -137,11 +165,49 @@ As variantes sem dados são **strings**; as outras são objetos de uma chave só
 "WindowForeground"
 { "TitleMatches": "*Nível 3*" }
 { "Expr": "contador < 10 && contem(texto, \"OK\")" }
+{ "Uia": { "elem": ELEM, "test": "Exists" } }
 ```
 
 - `Pixel`: cor RGB com tolerância por canal.
 - `OcrContains`: busca o texto sem diferenciar maiúsculas.
+- `Uia`: `test` é `"Exists"`, `{"NameContains": "texto"}`, `{"ValueContains": "texto"}` (sem diferenciar maiúsculas) ou `"Checked"` (caixa marcada). Faz uma busca só, sem esperar; para esperar o elemento, use a condição dentro de `WaitUntil`. Se o elemento não existir ou a UIA falhar, dá falso.
 - Pixel e OCR capturam a janela-alvo; com a janela minimizada a condição dá falso. No modo Background, jogos DirectX podem aparecer pretos: nesse caso use `"Focus"`.
+
+### Elementos (UIA)
+
+`ELEM` identifica um controle dentro da janela-alvo. Todos os campos são opcionais, mas pelo menos um entre `automation_id`, `name`, `control_type` e `class_name` precisa estar preenchido:
+
+```json
+{ "automation_id": "btnSalvar", "name": "Salvar", "control_type": "Button", "class_name": "", "x": 120, "y": 45 }
+```
+
+| Campo | Como casa |
+|---|---|
+| `automation_id` | igual, diferenciando maiúsculas. Quando preenchido, `name` só desempata (o texto do botão pode mudar) |
+| `name` | glob (`*`, `?`), sem diferenciar maiúsculas. Obrigatório casar quando não há `automation_id` |
+| `control_type` | igual ao tipo da UIA, sem o prefixo: `Button`, `Edit`, `CheckBox`, `RadioButton`, `ComboBox`, `ListItem`, `TabItem`, `TreeItem`, `MenuItem`, `Hyperlink`, `Text`, `Pane`, `Window`, `Document`… |
+| `class_name` | desempata; só é obrigatório casar quando não há `automation_id` nem `name` |
+| `ancestors` | lista opcional de `{automation_id, name, control_type, class_name}`, do pai para cima. Só desempata. Omita ao escrever à mão |
+| `x`, `y` | ponto (área cliente) onde o elemento foi capturado: desempata elementos iguais e é onde vai o clique de reserva |
+
+Quem tem os valores é o usuário: o botão 📍 do bloco ou da condição preenche tudo clicando no controle. Ferramentas como o Accessibility Insights ou o Inspect do SDK do Windows também mostram AutomationId, Name e ControlType. Se você não sabe a identificação, escreva o que souber (por exemplo, só `name` e `control_type`) e peça ao usuário para conferir com 📍.
+
+`action` é um destes:
+
+| Ação | Faz |
+|---|---|
+| `"Invoke"` | aciona (botão, link, item de menu) |
+| `"Toggle"` | alterna uma caixa de seleção |
+| `{"SetValue": "texto {expr}"}` | define o valor de um campo; interpola `{expr}` como `Type` |
+| `"Select"` | seleciona (item de lista, aba, botão de opção) |
+| `"Expand"` / `"Collapse"` | expande ou recolhe (árvore, combo, menu) |
+| `{"ReadValue": "var"}` | guarda o valor do campo (string) na variável |
+| `{"ReadName": "var"}` | guarda o nome do elemento (string) na variável |
+
+- O bloco procura o elemento a cada 200 ms até `timeout_ms` (*expr*). Sem achar, para com erro; com `"fallback_click": true`, clica em (`x`, `y`) como o `Click` faz e avisa no log.
+- O elemento precisa oferecer o padrão da ação (Invoke, Toggle, Value, SelectionItem, ExpandCollapse); senão, o bloco para com erro.
+- Se o app demorar mais de 3 s para responder a uma ação (por exemplo, um `Invoke` que abre uma janela modal), o bloco avisa no log e segue. Em `ReadValue`/`ReadName`, isso é erro.
+- Apps rodando como administrador só respondem se o UltraTask também estiver elevado.
 
 ### Expressões
 
@@ -229,7 +295,7 @@ Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
 Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em erro, `r_ok` fica `false`, `r_status` fica `0` e a mensagem vai para o log.
 
 **Arquivo** (`File`): `{"File": {"path": "dados/{dia}.csv", "mode": "Append"}}`.
-- `path` aceita `{expr}`; um caminho relativo parte da pasta do `ultratask.exe`; as pastas que faltam são criadas.
+- `path` aceita `{expr}`; um caminho relativo parte da pasta de dados: a pasta do `ultratask.exe` (ou do `.exe` exportado), ou `%LOCALAPPDATA%\UltraTask` quando ela não aceita escrita (a mesma pasta de `scripts\`). As pastas que faltam são criadas.
 - `mode`: `"Append"` (acrescenta no fim), `"Overwrite"` (troca o conteúdo) ou `"Read"` (lê o arquivo inteiro para `r`; o `payload` é ignorado).
 - Ao gravar: `Json` grava uma linha por envio; `Csv` grava a linha com os nomes das variáveis quando o arquivo é novo (ou vazio) e depois uma linha por envio; `Text` grava o texto como está, sem quebra de linha. As linhas de `Json` e `Csv` terminam em CRLF.
 - `r_status`: bytes gravados ou lidos. `r`: o conteúdo lido (vazio ao gravar).
@@ -259,7 +325,7 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 ```
 
 **Comando** (`Command`): `{"Command": {"program": "cmd", "args": ["/c", "echo {n}"], "timeout_ms": 10000}}`.
-- Roda o programa sem janela de console, na pasta do `ultratask.exe`. `program` (caminho ou nome no PATH) e cada item de `args` aceitam `{expr}`. Para um comando do `cmd`, ponha a linha inteira num só argumento depois de `"/c"`. Evite aspas dentro dos argumentos do `cmd`: o escape do Windows e o do `cmd` são diferentes.
+- Roda o programa sem janela de console, com a pasta de dados como pasta de trabalho (veja o Arquivo). `program` (caminho ou nome no PATH) e cada item de `args` aceitam `{expr}`. Para um comando do `cmd`, ponha a linha inteira num só argumento depois de `"/c"`. Evite aspas dentro dos argumentos do `cmd`: o escape do Windows e o do `cmd` são diferentes.
 - O envio (`payload`) vai pelo **stdin**. O **stdout**, sem espaços nas pontas, vai para `r`; o **código de saída** vai para `r_status`; `r_ok` é `true` só com código 0 (outro código vai para o log, com o stderr).
 - Se passar de `timeout_ms`, o processo (e o que ele abriu) é encerrado e o log diz `tempo esgotado`.
 - Cuidado: um valor de variável dentro de `args` vira parte da linha de comando. Para dados vindos de fora, prefira mandar pelo stdin.
@@ -297,7 +363,7 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 ```
 
 **SQLite** (`Sqlite`): `{"Sqlite": {"path": "dados.db", "sql": "SELECT nome FROM clientes WHERE id = :id", "timeout_ms": 10000}}`.
-- `path`: o arquivo `.db`, criado se faltar (com as pastas). Aceita `{expr}`; relativo parte da pasta do `ultratask.exe`. O SQLite vai embutido no exe.
+- `path`: o arquivo `.db`, criado se faltar (com as pastas). Aceita `{expr}`; relativo parte da pasta de dados (veja o Arquivo). O SQLite vai embutido no exe (também no `.exe` exportado).
 - `sql`: **um** comando. Os valores entram como `:variavel`, ligados ao valor atual da variável com o tipo preservado (inteiro, número, texto; booleano vira 1/0). O `sql` **não** aceita `{…}` e nunca recebe texto colado, então aspas e `;` nos valores não quebram nem injetam SQL. Não use `?`.
 - SELECT (ou qualquer comando que devolve colunas): `r` recebe as linhas como lista JSON de objetos, ex.: `[{"id":1,"nome":"Ana"}]`; leia com `json(r, "/0/nome")`. `r_status` = número de linhas. NULL vira `null` (e `json()` devolve `""`).
 - Outros comandos (INSERT, UPDATE, CREATE…): `r_status` (e `r`) = linhas afetadas.
@@ -384,6 +450,54 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 | Num0–Num9 | 96–105 |
 
 Para outras teclas, use o código *Virtual-Key* do Windows.
+
+## Exemplo no modo Navegador (CDP)
+
+Abre o Chrome numa página de busca, digita, salva com Ctrl+S e espera um pixel verde de confirmação:
+
+```json
+{
+  "name": "Busca no navegador",
+  "target": { "exe": "chrome.exe", "title": "*Exemplo*" },
+  "cdp": { "exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "args": "https://exemplo.com", "port": 0, "webview2": false, "keep_open": false },
+  "blocks": [
+    { "Click": { "x": "400", "y": "180", "button": "Left", "kind": "Click", "jitter_px": 0 } },
+    { "Type": { "text": "relatório {rand(1, 9)}" } },
+    { "Key": { "vk": 17, "action": "Down" } },
+    { "Key": { "vk": 83, "action": "Press" } },
+    { "Key": { "vk": 17, "action": "Up" } },
+    { "WaitUntil": {
+        "cond": { "kind": { "Pixel": { "x": "40", "y": "160", "color": [30, 160, 60], "tol": 20 } }, "negate": false },
+        "timeout_ms": "10000", "on_timeout": "Stop" } }
+  ]
+}
+```
+
+## Exemplo com UI Automation
+
+Preenche um formulário de um app WinForms sem tocar no mouse nem no teclado, marca "Urgente", salva e confere a mensagem de status:
+
+```json
+{
+  "name": "Pedido via UIA",
+  "target": { "exe": "Pedidos.exe", "title": "Pedidos*" },
+  "mode": "Background",
+  "blocks": [
+    { "SetVar": { "name": "n", "expr": "rand(100, 999)" } },
+    { "Uia": { "elem": { "automation_id": "txtCliente", "control_type": "Edit" }, "action": { "SetValue": "Cliente {n}" } } },
+    { "If": {
+        "cond": { "kind": { "Uia": { "elem": { "automation_id": "chkUrgente", "control_type": "CheckBox" }, "test": "Checked" } }, "negate": true },
+        "then": [ { "Uia": { "elem": { "automation_id": "chkUrgente", "control_type": "CheckBox" }, "action": "Toggle" } } ],
+        "else_": [] } },
+    { "Uia": { "elem": { "name": "Salvar", "control_type": "Button", "x": 320, "y": 410 }, "action": "Invoke", "timeout_ms": "3000", "fallback_click": true } },
+    { "WaitUntil": {
+        "cond": { "kind": { "Uia": { "elem": { "automation_id": "lblStatus" }, "test": { "NameContains": "salvo" } } }, "negate": false },
+        "timeout_ms": "10000", "on_timeout": "Stop" } },
+    { "Uia": { "elem": { "automation_id": "lblStatus" }, "action": { "ReadName": "status" } } },
+    { "Log": { "text": "pedido {n}: {status}" } }
+  ]
+}
+```
 
 ## Exemplo completo
 

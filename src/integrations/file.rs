@@ -1,6 +1,7 @@
 //! Destino Arquivo: acrescenta, sobrescreve ou lê um arquivo de texto.
 //!
-//! - Caminho com `{…}`; relativo parte da pasta do exe; as pastas que faltam são criadas.
+//! - Caminho com `{…}`; relativo parte da pasta de dados (`model::base_dir`: a do exe, ou
+//!   `%LOCALAPPDATA%\UltraTask` quando ela não aceita escrita); as pastas que faltam são criadas.
 //! - Ao gravar, JSON vira uma linha por envio, CSV ganha a linha de cabeçalho quando o
 //!   arquivo é novo (ou vazio), e texto vai como está.
 //! - `r` recebe o conteúdo lido (modo Ler) e `r_status` o número de bytes gravados ou lidos.
@@ -36,7 +37,7 @@ impl FileMode {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct FileDest {
-    /// Aceita `{expressão}`; relativo à pasta do exe.
+    /// Aceita `{expressão}`; relativo à pasta de dados.
     pub path: String,
     pub mode: FileMode,
 }
@@ -47,7 +48,7 @@ impl Default for FileDest {
     }
 }
 
-/// Caminho absoluto: um relativo parte da pasta do exe.
+/// Caminho absoluto: um relativo parte da pasta de dados (a mesma de `scripts\`).
 pub fn resolve(path: &str) -> PathBuf {
     let p = Path::new(path.trim());
     if p.is_absolute() { p.to_path_buf() } else { crate::model::base_dir().join(p) }

@@ -11,18 +11,20 @@ pub enum Section {
     Expressoes,
     Blocos,
     Condicoes,
+    Modos,
     Teclas,
     Atalhos,
 }
 
 impl Section {
-    pub const ALL: [Section; 5] = [Section::Expressoes, Section::Blocos, Section::Condicoes, Section::Teclas, Section::Atalhos];
+    pub const ALL: [Section; 6] = [Section::Expressoes, Section::Blocos, Section::Condicoes, Section::Modos, Section::Teclas, Section::Atalhos];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::Expressoes => "Expressões",
             Section::Blocos => "Blocos",
             Section::Condicoes => "Condições",
+            Section::Modos => "Modos",
             Section::Teclas => "Teclas",
             Section::Atalhos => "Atalhos",
         }
@@ -73,6 +75,7 @@ fn block_help(b: &Block) -> &'static str {
         Block::While { .. } => "repete o corpo enquanto a condição valer",
         Block::SetVar { .. } => "guarda o valor da expressão numa variável",
         Block::OcrToVar { .. } => "lê o texto de uma região da janela (OCR) e guarda numa variável",
+        Block::Uia { .. } => "age num controle pela UI Automation, sem mouse nem teclado: acionar, alternar, definir valor ({expressão}), selecionar, expandir, recolher ou ler o valor/nome para uma variável. Capture o elemento com 📍; espera ele aparecer até o timeout e, sem achar, para com erro ou clica no ponto capturado",
         Block::Call { .. } => "roda outro script, com a mesma janela e as mesmas variáveis",
         Block::Log { .. } => "escreve no log do app; {expressão} é trocado pelo valor",
         Block::Breakpoint => "pausa aqui; veja as variáveis no painel e clique ▶ para continuar",
@@ -101,6 +104,17 @@ pub fn entries(s: Section, settings: &Settings) -> Vec<Entry> {
             e("janela está em foco", "a janela-alvo é a janela ativa", None),
             e("título casa com", "o título bate com o padrão; * = qualquer trecho, ? = um caractere", Some("*Nível 3*")),
             e("expressão", "vale se a expressão der verdadeiro", Some("contador < 10 && contem(texto, \"OK\")")),
+            e("elemento (UIA)", "o elemento capturado com 📍 existe, o nome ou o valor contém o texto (sem diferenciar maiúsculas), ou a caixa está marcada; uma busca só, sem esperar (use em Esperar até para esperar)", None),
+        ],
+        Section::Modos => vec![
+            e("Segundo plano", "manda mensagens direto para a janela-alvo; o cursor real não se mexe e vários scripts rodam juntos. Para apps desktop (Win32, WinForms, WPF)", None),
+            e("Foco", "traz a janela para frente e usa o mouse e o teclado reais; um script por vez, pausa enquanto você mexe no mouse/teclado. Para jogos", None),
+            e(
+                "Navegador (CDP)",
+                "para Chrome, Edge, Electron e WebView2: ao tocar, o UltraTask abre o app (Programa + Argumentos) com depuração remota só em 127.0.0.1, uma porta e um perfil temporário próprios por execução, e escolhe a página cujo título casa com o Título da janela-alvo. Clique, Mover, Rolar, Tecla (com Ctrl/Alt/Shift) e Digitar viram eventos do protocolo, sem tocar no mouse/teclado reais e com a janela coberta; Pixel e OCR usam a captura da página. As coordenadas continuam na área cliente. Blocos e condições de UI Automation não funcionam neste modo. No fim, fecha o app e apaga o perfil",
+                Some("Programa: C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe   Argumentos: https://exemplo.com"),
+            ),
+            e("Risco da porta (CDP)", "enquanto o app roda, qualquer programa deste PC pode controlá-lo pela porta de depuração; não use com o seu perfil do dia a dia", None),
         ],
         Section::Teclas => all_keys().into_iter().map(|vk| e(key_name(vk), format!("vk {vk}"), None)).collect(),
         Section::Atalhos => vec![
@@ -159,6 +173,7 @@ mod tests {
             assert!(ex.iter().any(|e| e.term == f.sig), "Manual sem {}", f.name);
         }
         assert!(entries(Section::Blocos, &st).iter().all(|e| !e.desc.is_empty()), "bloco sem texto no Manual");
+        assert!(entries(Section::Modos, &st).iter().any(|e| e.term == "Navegador (CDP)"), "Manual sem o modo CDP");
     }
 
     #[test]

@@ -4,6 +4,7 @@ use crate::catalog::{self, FieldKind};
 use crate::manual::{self, Section};
 use crate::model::{self, *};
 use crate::runner::{self, RunHandle};
+use crate::uia::{self, UiaAction, UiaElem, UiaTest};
 use crate::win::{self, Hwnd, WinInfo};
 use crate::{TrayMsg, make_tray};
 use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui, ViewportCommand};
@@ -31,12 +32,14 @@ enum Pick {
     Target,
     Point(Id),
     Region(Id, Option<(i32, i32)>),
+    Uia(Id),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum PickData {
     Point(i32, i32, [u8; 3]),
     Region(Region),
+    Uia(Box<uia::Captured>),
 }
 
 pub struct App {
@@ -55,6 +58,8 @@ pub struct App {
     pick: Option<Pick>,
     pick_req: Option<Pick>,
     pick_result: Option<(Id, PickData)>,
+    /// 📍 on a UIA element: captured on a worker thread, never on this one.
+    uia_pick: Option<(Id, Receiver<Result<uia::Captured, String>>)>,
     chooser: Option<(usize, Purpose, Vec<WinInfo>)>,
     rename: Option<String>,
     confirm_delete: bool,
@@ -126,6 +131,7 @@ impl App {
             pick: None,
             pick_req: None,
             pick_result: None,
+            uia_pick: None,
             chooser: None,
             rename: None,
             confirm_delete: false,
@@ -143,6 +149,9 @@ impl App {
         };
         for e in errs {
             app.say(format!("Erro ao ler script {e}"));
+        }
+        for w in [crate::compat::data_dir().warning.clone(), crate::compat::render_note(cc)].into_iter().flatten() {
+            app.say(w);
         }
         if app.settings.start_with_windows {
             // Re-write so the entry follows the exe if it was moved.
@@ -309,6 +318,9 @@ impl App {
     }
 
     fn start_with_target(&mut self, i: usize, purpose: Purpose, ctx: &egui::Context) {
+        if purpose == Purpose::Play && self.scripts[i].cdp.is_some() {
+            return self.play_cdp(i, 0);
+        }
         let Some(rule) = self.scripts[i].target.clone() else {
             self.say(format!("'{}': defina a janela-alvo na aba Config", self.scripts[i].name));
             self.show(ctx);
@@ -345,6 +357,9 @@ impl App {
     }
 
     fn play_on(&mut self, i: usize, w: WinInfo, delay_ms: u64) {
+        if self.scripts[i].cdp.is_some() {
+            return self.play_cdp(i, delay_ms);
+        }
         if !win::self_elevated() && win::is_elevated_pid(w.pid) {
             self.elevated_target = true;
             self.say(format!("'{}' roda como administrador: o Windows bloqueia input vindo do UltraTask", w.title));
@@ -357,6 +372,26 @@ impl App {
             return;
         }
         let h = runner::spawn(s, self.scripts.clone(), w, &self.settings, delay_ms, self.log_tx.clone(), self.wake.clone());
+        self.push_run(h);
+    }
+
+    /// "Navegador (CDP)": UltraTask opens the app itself, so no window is needed up front.
+    fn play_cdp(&mut self, i: usize, delay_ms: u64) {
+        self.save_dirty();
+        let s = self.scripts[i].clone();
+        if s.blocks.is_empty() {
+            self.say(format!("'{}' não tem blocos", s.name));
+            return;
+        }
+        if let Some(e) = s.cdp.as_ref().and_then(|c| crate::cdp::validate(c, s.trigger).into_iter().next()) {
+            self.say(format!("'{}': {e}", s.name));
+            return;
+        }
+        let h = crate::cdp::spawn(s, self.scripts.clone(), &self.settings, delay_ms, self.log_tx.clone(), self.wake.clone());
+        self.push_run(h);
+    }
+
+    fn push_run(&mut self, h: RunHandle) {
         self.runs.push(h);
         // Keep finished runs around for inspecting their variables, but not forever.
         while self.runs.len() > 30 {
@@ -369,7 +404,7 @@ impl App {
         }
     }
 
-    fn finish_record(&mut self, events: Vec<Event>, ctx: &egui::Context) {
+    fn finish_record(&mut self, events: Vec<Event>, elements: Vec<crate::uia_rec::RecElem>, ctx: &egui::Context) {
         let Some((i, h)) = self.recording.take() else { return };
         self.show(ctx);
         if events.is_empty() || i >= self.scripts.len() {
@@ -383,7 +418,7 @@ impl App {
         }
         let s = &mut self.scripts[i];
         s.client_size = win::client_size(h);
-        s.blocks.push(Block::Recording { events, speed: 1.0 });
+        s.blocks.push(Block::Recording { events, speed: 1.0, elements });
         self.dirty = true;
         self.save_dirty();
     }
@@ -399,6 +434,7 @@ impl App {
         self.say(match self.pick {
             Some(Pick::Region(..)) => "Clique no canto SUPERIOR ESQUERDO da região",
             Some(Pick::Target) => "Clique na janela-alvo",
+            Some(Pick::Uia(_)) => "Clique no elemento da janela-alvo",
             _ => "Clique no ponto da janela-alvo",
         });
     }
@@ -443,6 +479,10 @@ impl App {
             Pick::Region(id, Some((x0, y0))) => {
                 let r = Region { x: x0.min(cx), y: y0.min(cy), w: (cx - x0).abs(), h: (cy - y0).abs() };
                 self.pick_result = Some((id, PickData::Region(r)));
+            }
+            Pick::Uia(id) => {
+                self.uia_pick = Some((id, uia::capture_async(t.hwnd, x, y, cx, cy, self.wake.clone())));
+                self.say("Lendo o elemento pela UI Automation…");
             }
             Pick::Target => unreachable!(),
         }
@@ -567,6 +607,13 @@ impl App {
                 }
                 if ui.button("🗑 Excluir").clicked() {
                     self.confirm_delete = true;
+                }
+                if ui.button("📦 Exportar .exe").on_hover_text("Grava um .exe que só toca este script (com os scripts que ele chama)").clicked() {
+                    self.save_dirty();
+                    match crate::export::export_interactive(&self.scripts[i], &self.scripts, &self.settings) {
+                        Ok(Some(m)) | Err(m) => self.say(m),
+                        Ok(None) => {}
+                    }
                 }
             }
         });
@@ -771,9 +818,17 @@ impl App {
 
             ui.label("Modo");
             ui.vertical(|ui| {
-                ui.radio_value(&mut s.mode, Mode::Background, "Segundo plano — não usa seu mouse/teclado (apps desktop)");
-                ui.radio_value(&mut s.mode, Mode::Focus, "Foco — traz a janela para frente e usa o mouse/teclado reais (jogos)");
+                let cdp = s.cdp.is_some();
+                for (m, label) in [(Mode::Background, "Segundo plano — não usa seu mouse/teclado (apps desktop)"), (Mode::Focus, "Foco — traz a janela para frente e usa o mouse/teclado reais (jogos)")] {
+                    if ui.radio(!cdp && s.mode == m, label).clicked() {
+                        (s.mode, s.cdp) = (m, None);
+                    }
+                }
+                if ui.radio(cdp, crate::cdp::ui::MODE_LABEL).clicked() && !cdp {
+                    s.cdp = Some(Default::default());
+                }
                 match s.mode {
+                    _ if s.cdp.is_some() => crate::cdp::ui::config_ui(ui, s.cdp.as_mut().unwrap(), s.trigger),
                     Mode::Background => {
                         ui.checkbox(&mut s.simulate_focus, "Simular foco (para apps/jogos que ignoram input quando inativos)");
                         ui.weak("Atalhos com Ctrl/Alt/Shift podem falhar em segundo plano; use o modo Foco nesses casos.");
@@ -963,13 +1018,28 @@ impl eframe::App for App {
                 },
                 Out::Hotkey(hooks::PANIC_HOTKEY) => self.panic(),
                 Out::Hotkey(id) => self.toggle_play((id - hooks::SCRIPT_HOTKEY) as usize, ctx),
-                Out::Recorded(ev) => self.finish_record(ev, ctx),
+                Out::Recorded(ev, els) => self.finish_record(ev, els, ctx),
                 Out::Picked { x, y, root } => self.on_pick(x, y, root, ctx),
                 Out::Error(e) => self.say(e),
             }
         }
         while let Ok(l) = self.log_rx.try_recv() {
             self.say(l);
+        }
+        let uia_got = self.uia_pick.as_ref().map(|(id, rx)| (*id, rx.try_recv()));
+        match uia_got {
+            Some((id, Ok(Ok(c)))) => {
+                self.uia_pick = None;
+                self.say(format!("Elemento: {}", uia::describe(&c.elem)));
+                self.pick_result = Some((id, PickData::Uia(Box::new(c))));
+                ctx.request_repaint();
+            }
+            Some((_, Ok(Err(e)))) => {
+                self.uia_pick = None;
+                self.say(format!("Não deu para ler o elemento: {e}"));
+            }
+            Some((_, Err(std::sync::mpsc::TryRecvError::Disconnected))) => self.uia_pick = None,
+            _ => {}
         }
         while let Ok(m) = self.tray_rx.try_recv() {
             match m {
@@ -1024,11 +1094,8 @@ struct EditCtx<'a> {
 
 impl EditCtx<'_> {
     fn take(&mut self, id: Id) -> Option<PickData> {
-        match *self.pick_result {
-            Some((pid, d)) if pid == id => {
-                *self.pick_result = None;
-                Some(d)
-            }
+        match self.pick_result {
+            Some((pid, _)) if *pid == id => self.pick_result.take().map(|r| r.1),
             _ => None,
         }
     }
@@ -1142,11 +1209,15 @@ const BTNS: &[(Btn, &str)] = &[(Btn::Left, "esquerdo"), (Btn::Right, "direito"),
 /// Returns true when "Explodir" was clicked on a recording block.
 fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
     match b {
-        Block::Recording { events, speed } => {
+        Block::Recording { events, speed, elements } => {
             let secs = events.last().map_or(0, |e| e.t) as f32 / 1000.0;
             ui.label(format!("{} eventos, {secs:.1}s", events.len()));
+            let uia = elements.iter().filter(|r| r.action.is_some()).count();
+            if uia > 0 {
+                ui.weak(format!("{uia} cliques viram Elemento (UIA) ao explodir"));
+            }
             ui.add(DragValue::new(speed).range(0.1..=10.0).speed(0.05).prefix("velocidade ").suffix("×"));
-            return ui.button("Explodir em passos").on_hover_text("Converte em Clique/Tecla/Esperar editáveis (descarta movimentos soltos)").clicked();
+            return ui.button("Explodir em passos").on_hover_text("Converte em Clique/Tecla/Esperar editáveis (descarta movimentos soltos); cliques em botões, caixas e itens viram Elemento (UIA), com o clique como reserva").clicked();
         }
         Block::Move { x, y } => {
             xy_ui(ui, x, y, id, ec);
@@ -1192,6 +1263,16 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
             expr_edit(ui, expr, 240.0, id.with("e"), ec);
             help_btn(ui, ec);
         }
+        Block::Uia { elem, action, timeout_ms, fallback_click } => {
+            if let Some(Some(suggested)) = uia_elem_ui(ui, elem, id, ec) {
+                *action = suggested;
+            }
+            uia_action_ui(ui, action, id.with("act"), ec);
+            ui.label("esperar até");
+            expr_edit(ui, timeout_ms, 60.0, id.with("uiat"), ec);
+            ui.label("ms");
+            ui.checkbox(fallback_click, "se não achar, clicar no ponto").on_hover_text("Sem esta opção, o bloco para com erro quando o elemento não aparece");
+        }
         Block::OcrToVar { name, region } => {
             ui.add(egui::TextEdit::singleline(name).desired_width(100.0));
             ui.label("= texto da região");
@@ -1219,13 +1300,14 @@ fn block_fields(ui: &mut Ui, b: &mut Block, id: Id, ec: &mut EditCtx) -> bool {
 
 fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
     ui.checkbox(&mut c.negate, "não");
-    let kinds: [(&str, fn() -> CondKind); 6] = [
+    let kinds: [(&str, fn() -> CondKind); 7] = [
         ("pixel tem a cor", || CondKind::Pixel { x: "0".into(), y: "0".into(), color: [255, 255, 255], tol: 10 }),
         ("texto (OCR) contém", || CondKind::OcrContains { region: Region { x: 0, y: 0, w: 200, h: 40 }, text: String::new() }),
         ("janela existe", || CondKind::WindowExists),
         ("janela está em foco", || CondKind::WindowForeground),
         ("título casa com", || CondKind::TitleMatches("*".into())),
         ("expressão", || CondKind::Expr("contador < 10".into())),
+        ("elemento (UIA)", || CondKind::Uia { elem: UiaElem::default(), test: UiaTest::Exists }),
     ];
     let same = |a: &CondKind, b: &CondKind| std::mem::discriminant(a) == std::mem::discriminant(b);
     let cur = kinds.iter().find(|k| same(&k.1(), &c.kind)).map_or("?", |k| k.0);
@@ -1256,6 +1338,83 @@ fn cond_ui(ui: &mut Ui, c: &mut Condition, id: Id, ec: &mut EditCtx) {
             help_btn(ui, ec);
         }
         CondKind::WindowExists | CondKind::WindowForeground => {}
+        CondKind::Uia { elem, test } => {
+            uia_elem_ui(ui, elem, id, ec);
+            let same = |a: &UiaTest, b: &UiaTest| std::mem::discriminant(a) == std::mem::discriminant(b);
+            ComboBox::from_id_salt(id.with("uiatest")).selected_text(test.label()).show_ui(ui, |ui| {
+                for t in UiaTest::all() {
+                    if ui.selectable_label(same(test, &t), t.label()).clicked() && !same(test, &t) {
+                        *test = t;
+                    }
+                }
+            });
+            if let UiaTest::NameContains(t) | UiaTest::ValueContains(t) = test {
+                ui.add(egui::TextEdit::singleline(t).desired_width(140.0).hint_text("texto"));
+            }
+        }
+    }
+}
+
+/// The element's identification (editable in a popup) and 📍 to capture it.
+/// Returns `Some(suggested action)` right after a capture.
+fn uia_elem_ui(ui: &mut Ui, e: &mut UiaElem, id: Id, ec: &mut EditCtx) -> Option<Option<UiaAction>> {
+    ui.menu_button(uia::describe(e), |ui| {
+        egui::Grid::new(id.with("uiagrid")).num_columns(2).show(ui, |ui| {
+            ui.label("AutomationId");
+            ui.add(egui::TextEdit::singleline(&mut e.automation_id).desired_width(200.0));
+            ui.end_row();
+            ui.label("Nome");
+            ui.add(egui::TextEdit::singleline(&mut e.name).desired_width(200.0).hint_text("aceita * e ?"));
+            ui.end_row();
+            ui.label("ControlType");
+            ComboBox::from_id_salt(id.with("uiact")).selected_text(if e.control_type.is_empty() { "qualquer" } else { e.control_type.as_str() }).height(320.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut e.control_type, String::new(), "qualquer");
+                for ct in uia::CONTROL_TYPES {
+                    ui.selectable_value(&mut e.control_type, ct.to_string(), *ct);
+                }
+            });
+            ui.end_row();
+            ui.label("ClassName");
+            ui.add(egui::TextEdit::singleline(&mut e.class_name).desired_width(200.0));
+            ui.end_row();
+            ui.label("Ponto capturado");
+            ui.horizontal(|ui| {
+                ui.add(DragValue::new(&mut e.x).prefix("x "));
+                ui.add(DragValue::new(&mut e.y).prefix("y "));
+            });
+            ui.end_row();
+        });
+        if !e.ancestors.is_empty() {
+            ui.weak(format!("{} ancestrais gravados (desempatam elementos iguais)", e.ancestors.len()));
+        }
+    })
+    .response
+    .on_hover_text("Identificação do elemento; clique para editar");
+    if ui.small_button("📍").on_hover_text("Capturar o elemento clicando nele na janela-alvo").clicked() {
+        *ec.pick_req = Some(Pick::Uia(id));
+    }
+    if let Some(PickData::Uia(c)) = ec.take(id) {
+        *e = c.elem;
+        return Some(c.action);
+    }
+    None
+}
+
+fn uia_action_ui(ui: &mut Ui, a: &mut UiaAction, id: Id, ec: &mut EditCtx) {
+    let same = |x: &UiaAction, y: &UiaAction| std::mem::discriminant(x) == std::mem::discriminant(y);
+    ComboBox::from_id_salt(id).selected_text(a.label()).show_ui(ui, |ui| {
+        for o in UiaAction::all() {
+            if ui.selectable_label(same(a, &o), o.label()).clicked() && !same(a, &o) {
+                *a = o;
+            }
+        }
+    });
+    match a {
+        UiaAction::SetValue(t) => text_edit(ui, t, id.with("val"), ec, "texto; aceita {variavel}"),
+        UiaAction::ReadValue(v) | UiaAction::ReadName(v) => {
+            ui.add(egui::TextEdit::singleline(v).desired_width(100.0).hint_text("variável"));
+        }
+        _ => {}
     }
 }
 
@@ -1270,9 +1429,17 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.run_ui(Default::default(), |_| {}).textures_delta.clear(); // loads the fonts
         let src = [
+            include_str!("bgkeys.rs"),
             include_str!("catalog.rs"),
+            include_str!("cdp/client.rs"),
+            include_str!("cdp/input.rs"),
+            include_str!("cdp/launch.rs"),
+            include_str!("cdp/mod.rs"),
+            include_str!("cdp/ui.rs"),
             include_str!("cola.rs"),
+            include_str!("compat.rs"),
             include_str!("editor.rs"),
+            include_str!("export.rs"),
             include_str!("humanmouse.rs"),
             include_str!("integrations/clipboard.rs"),
             include_str!("integrations/command.rs"),
@@ -1288,8 +1455,12 @@ mod tests {
             include_str!("manual.rs"),
             include_str!("model.rs"),
             include_str!("runner.rs"),
+            include_str!("runner/uia_block.rs"),
             include_str!("tree.rs"),
             include_str!("ui.rs"),
+            include_str!("uia.rs"),
+            include_str!("uia_rec.rs"),
+            include_str!("wgc.rs"),
         ]
         .concat();
         let mut chars = std::collections::BTreeSet::new();

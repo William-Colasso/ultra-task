@@ -3,6 +3,7 @@
 use crate::hooks;
 use crate::humanmouse;
 use crate::model::*;
+use crate::uia;
 use crate::win::{self, Injector, WinInfo};
 use evalexpr::{ContextWithMutableFunctions, ContextWithMutableVariables, EvalexprResult, Function, HashMapContext, IterateVariablesContext, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,7 +46,14 @@ pub trait Io {
     fn pointer(&mut self, last_sent: Option<(i32, i32)>) -> (i32, i32) {
         last_sent.unwrap_or((0, 0))
     }
+    /// One UI Automation lookup + operation on the target window (never waits for the
+    /// element to appear: the interpreter polls).
+    fn uia(&mut self, _q: &uia::Query) -> R<uia::Reply> {
+        Err("UI Automation indisponível".into())
+    }
 }
+
+mod uia_block;
 
 /// Live view of a run for the debug panel; shared between the run thread and the UI.
 #[derive(Default)]
@@ -293,7 +301,7 @@ impl<'a> Interp<'a> {
 
     fn run_block(&mut self, b: &Block) -> R {
         match b {
-            Block::Recording { events, speed } => {
+            Block::Recording { events, speed, .. } => {
                 let k = (speed * self.speed).max(0.01) as f64;
                 let mut base = self.io.now_ms();
                 for e in events {
@@ -394,6 +402,7 @@ impl<'a> Interp<'a> {
                 self.var_set(name);
                 self.snapshot_vars();
             }
+            Block::Uia { elem, action, timeout_ms, fallback_click } => self.run_uia(elem, action, timeout_ms, *fallback_click)?,
             Block::OcrToVar { name, region } => {
                 let t = self.io.ocr(*region)?;
                 self.set_var(name, Value::String(t.trim().into()))?;
@@ -450,6 +459,7 @@ impl<'a> Interp<'a> {
             CondKind::WindowExists => self.io.window_exists(),
             CondKind::WindowForeground => self.io.window_foreground(),
             CondKind::TitleMatches(p) => glob_match(p, &self.io.window_title()),
+            CondKind::Uia { elem, test } => self.cond_uia(elem, test)?,
             CondKind::Expr(s) => match self.eval(s)? {
                 Value::Boolean(b) => b,
                 v => return Err(Halt::Error(format!("condição '{s}' deveria dar verdadeiro/falso, deu {v}"))),
@@ -564,6 +574,17 @@ pub struct RunHandle {
     pub status: Arc<Mutex<String>>,
     pub done: Arc<AtomicBool>,
     pub dbg: Arc<Debug>,
+    /// Valid once `done`: see [`exit_code`].
+    pub exit_code: Arc<std::sync::atomic::AtomicI32>,
+}
+
+/// Process exit code for a finished run (used by exported .exe files): 0 ok, 1 error, 2 stopped.
+pub fn exit_code(r: &Result<(), Halt>) -> i32 {
+    match r {
+        Ok(()) => 0,
+        Err(Halt::Error(_)) => 1,
+        Err(Halt::Stopped) => 2,
+    }
 }
 
 struct WinIo {
@@ -575,9 +596,37 @@ struct WinIo {
     ocr_scale: u32,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<String>>,
+    /// Escreve no log da execução (avisos do Injector e da captura).
+    say: Box<dyn Fn(String)>,
+    last_note: String,
+    /// Segundo plano: PrintWindow, trocando para Windows Graphics Capture se vier de uma cor só.
+    cap: crate::wgc::BgCapture,
+    /// Started on first use; UIA calls never run on this run's thread itself (timeouts).
+    uia: uia::Worker<uia::Ctx>,
 }
 
 impl WinIo {
+    fn capture(&mut self) -> R<win::Image> {
+        if self.inj.mode == Mode::Focus {
+            return Ok(win::capture_client(self.inj.top, Mode::Focus)?);
+        }
+        let now = self.start.elapsed().as_millis() as u64;
+        let (img, note) = self.cap.capture(self.inj.top, now)?;
+        if let Some(n) = note {
+            (self.say)(n);
+        }
+        Ok(img)
+    }
+
+    fn flush_notes(&mut self) {
+        for n in std::mem::take(&mut self.inj.notes) {
+            if n != self.last_note {
+                (self.say)(n.clone());
+                self.last_note = n;
+            }
+        }
+    }
+
     /// Focus mode: while the user is touching mouse/keyboard, release everything and wait
     /// until they've been idle for `idle_ms`. Paused time is excluded from the timeline.
     fn gate(&mut self) -> R {
@@ -616,6 +665,7 @@ impl Io for WinIo {
         self.gate()?;
         self.alive()?;
         self.inj.send(ev);
+        self.flush_notes();
         Ok(())
     }
     fn type_text(&mut self, s: &str) -> R {
@@ -625,11 +675,11 @@ impl Io for WinIo {
         Ok(())
     }
     fn pixel(&mut self, x: i32, y: i32) -> R<[u8; 3]> {
-        let img = win::capture_client(self.inj.top, self.inj.mode)?;
+        let img = self.capture()?;
         img.pixel(x, y).ok_or_else(|| Halt::Error(format!("pixel ({x},{y}) fora da janela")))
     }
     fn ocr(&mut self, r: Region) -> R<String> {
-        let img = win::capture_client(self.inj.top, self.inj.mode)?;
+        let img = self.capture()?;
         Ok(win::ocr(&img.crop(r).scale(self.ocr_scale))?)
     }
     fn window_exists(&mut self) -> bool {
@@ -654,6 +704,16 @@ impl Io for WinIo {
             (Mode::Background, None) => win::client_size(self.inj.top).map_or((0, 0), |(w, h)| (w / 2, h / 2)),
         }
     }
+    // No `gate()`: UIA sends no input, so it runs while the user types (even in Focus mode).
+    fn uia(&mut self, q: &uia::Query) -> R<uia::Reply> {
+        self.alive()?;
+        let (hwnd, q) = (self.inj.top, q.clone());
+        match self.uia.call(uia::CALL_TIMEOUT, move |c| uia::query(c, hwnd, &q)) {
+            Ok(r) => Ok(r),
+            Err(uia::CallErr::Timeout) => Ok(uia::Reply::TimedOut),
+            Err(uia::CallErr::Failed(e)) => Err(Halt::Error(e)),
+        }
+    }
 }
 
 /// `delay_ms`: wait before starting (trigger delay), still stoppable.
@@ -662,6 +722,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
     let status = Arc::new(Mutex::new("Iniciando".to_string()));
     let done = Arc::new(AtomicBool::new(false));
     let dbg = Arc::new(Debug::default());
+    let code = Arc::new(std::sync::atomic::AtomicI32::new(0));
     let h = RunHandle {
         script: script.name.clone(),
         window: target.title.clone(),
@@ -669,6 +730,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
         status: status.clone(),
         done: done.clone(),
         dbg: dbg.clone(),
+        exit_code: code.clone(),
     };
     let (idle_ms, ocr_scale) = ((settings.idle_resume_s * 1000.0) as u64, settings.ocr_scale);
     std::thread::spawn(move || {
@@ -711,6 +773,16 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
                 ocr_scale,
                 stop: stop.clone(),
                 status: status.clone(),
+                say: {
+                    let (log, name, wake) = (log.clone(), script.name.clone(), wake.clone());
+                    Box::new(move |m| {
+                        let _ = log.send(format!("[{name}] {m}"));
+                        wake();
+                    })
+                },
+                last_note: String::new(),
+                cap: Default::default(),
+                uia: uia::session(),
             };
             io.inj.prepare();
             let mut log_fn = |m: String| say(m);
@@ -742,6 +814,7 @@ pub fn spawn(script: Script, all: Vec<Script>, target: WinInfo, settings: &Setti
         if focus {
             hooks::watch_physical(false);
         }
+        code.store(exit_code(&result), Ordering::SeqCst);
         match result {
             Ok(()) => say("terminou".into()),
             Err(Halt::Stopped) => say("parado".into()),
@@ -886,11 +959,24 @@ mod tests {
     #[test]
     fn recording_timing_and_clicks() {
         let events = vec![Event { t: 0, ev: Ev::Move(1, 1) }, Event { t: 100, ev: Ev::Move(2, 2) }, Event { t: 250, ev: Ev::Move(3, 3) }];
-        let (io, _) = run_with(vec![Block::Recording { events: events.clone(), speed: 2.0 }], vec![]);
+        let (io, _) = run_with(vec![Block::Recording { events: events.clone(), speed: 2.0, elements: vec![] }], vec![]);
         assert_eq!(io.sent.iter().map(|s| s.0).collect::<Vec<_>>(), [0, 50, 125]);
         let (io, _) = run_with(vec![Block::Click { x: "1+1".into(), y: "3".into(), button: Btn::Left, kind: ClickKind::Double, jitter_px: 0 }], vec![]);
         let downs = io.sent.iter().filter(|s| matches!(s.1, Ev::Button(Btn::Left, true, 2, 3))).count();
         assert_eq!(downs, 2);
+    }
+
+    /// Ticket 17: the raw playback ignores the recorded UIA elements.
+    #[test]
+    fn recording_with_elements_plays_the_same() {
+        let e = |t, ev| Event { t, ev };
+        let events = vec![e(0, Ev::Move(5, 5)), e(100, Ev::Button(Btn::Left, true, 5, 5)), e(160, Ev::Button(Btn::Left, false, 5, 5))];
+        let elem = crate::uia::UiaElem { automation_id: "btnOk".into(), control_type: "Button".into(), x: 5, y: 5, ..Default::default() };
+        let rec = |elements| Block::Recording { events: events.clone(), speed: 1.0, elements };
+        let (plain, r1) = run_with(vec![rec(vec![])], vec![]);
+        let (with, r2) = run_with(vec![rec(vec![crate::uia_rec::RecElem { event: 1, elem, action: Some(crate::uia::UiaAction::Invoke) }])], vec![]);
+        assert_eq!((r1, r2), (Ok(()), Ok(())));
+        assert_eq!(plain.sent, with.sent);
     }
 
     #[test]

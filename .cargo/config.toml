@@ -1,0 +1,5 @@
+# Ticket 06: o exe MSVC leva o CRT estático e não depende do runtime do Visual C++
+# (vcruntime140.dll). O alvo gnu já liga o runtime do mingw estaticamente e só importa
+# msvcrt.dll, que vem no Windows.
+[target.'cfg(target_env = "msvc")']
+rustflags = ["-C", "target-feature=+crt-static"]

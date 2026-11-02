@@ -235,7 +235,7 @@ fn file_ui(ui: &mut Ui, f: &mut FileDest, id: Id) {
     });
     ui.weak(match f.mode {
         FileMode::Read => "lê o arquivo inteiro para a variável de resultado (o envio é ignorado)",
-        _ => "caminho relativo parte da pasta do exe; JSON grava uma linha por envio, CSV ganha cabeçalho no arquivo novo",
+        _ => "caminho relativo parte da pasta de dados (a do exe ou, sem escrita nela, %LOCALAPPDATA%\\UltraTask); JSON grava uma linha por envio, CSV ganha cabeçalho no arquivo novo",
     });
 }
 

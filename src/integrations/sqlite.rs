@@ -21,7 +21,7 @@ use std::time::Duration;
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct SqliteDest {
-    /// Arquivo .db; aceita `{expressão}`; relativo à pasta do exe.
+    /// Arquivo .db; aceita `{expressão}`; relativo à pasta de dados.
     pub path: String,
     /// Um comando SQL, com `:variavel` nos valores. Não aceita `{…}`.
     pub sql: String,

@@ -299,11 +299,13 @@ pub struct Injector {
     keys: Vec<(u16, u16, bool)>,
     last_child: Hwnd,
     last_pos: (i32, i32),
+    /// Avisos para o log da execução (ex.: combinação não enviada a um alvo travado).
+    pub notes: Vec<String>,
 }
 
 impl Injector {
     pub fn new(top: Hwnd, mode: Mode, simulate_focus: bool) -> Self {
-        Injector { top, mode, simulate_focus, buttons: vec![], keys: vec![], last_child: 0, last_pos: (0, 0) }
+        Injector { top, mode, simulate_focus, buttons: vec![], keys: vec![], last_child: 0, last_pos: (0, 0), notes: vec![] }
     }
 
     pub fn prepare(&mut self) {
@@ -430,8 +432,23 @@ impl Injector {
                             (true, true) => WM_SYSKEYDOWN,
                             (false, true) => WM_SYSKEYUP,
                         };
-                        unsafe {
-                            let _ = PostMessageW(Some(self.focus_target()), msg, WPARAM(vk as usize), LPARAM(key_lparam(scan, ext, !down, alt)));
+                        let dest = self.focus_target();
+                        let post = || unsafe {
+                            let _ = PostMessageW(Some(dest), msg, WPARAM(vk as usize), LPARAM(key_lparam(scan, ext, !down, alt)));
+                        };
+                        // Ticket 14: com Ctrl/Alt/Shift presos, o alvo precisa vê-los em GetKeyState.
+                        let held = crate::bgkeys::held_mods(self.keys.iter().map(|k| (k.0, k.2)));
+                        match crate::bgkeys::plan(vk, held, || crate::bgkeys::is_hung(dest)) {
+                            crate::bgkeys::KeyPath::Plain => post(),
+                            crate::bgkeys::KeyPath::Forge(m) => {
+                                if let Err(e) = crate::bgkeys::post_with_mods(dest, m, post) {
+                                    self.notes.push(format!("aviso: {} enviado sem modificadores: {e}", crate::bgkeys::combo_name(m, vk)));
+                                    post();
+                                }
+                            }
+                            crate::bgkeys::KeyPath::Hung => {
+                                self.notes.push(format!("aviso: a janela-alvo não responde; {} não foi enviado", crate::bgkeys::combo_name(held, vk)));
+                            }
                         }
                     }
                     Mode::Focus => {
@@ -591,7 +608,15 @@ pub fn ocr(img: &Image) -> Result<String, String> {
     unsafe {
         let _ = RoInitialize(RO_INIT_MULTITHREADED);
     }
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages().map_err(e)?;
+    // Sem idioma com OCR o Windows devolve um motor nulo (Err aqui): explique como instalar.
+    let profile = OcrEngine::TryCreateFromUserProfileLanguages();
+    let langs = OcrEngine::AvailableRecognizerLanguages().ok();
+    let n = langs.as_ref().and_then(|l| l.Size().ok()).unwrap_or(0) as usize;
+    let engine = match (crate::compat::choose_ocr(profile.is_ok(), n), profile) {
+        (crate::compat::OcrChoice::UserProfile, Ok(engine)) => engine,
+        (crate::compat::OcrChoice::FirstInstalled, _) => langs.and_then(|l| l.GetAt(0).ok()).and_then(|l| OcrEngine::TryCreateFromLanguage(&l).ok()).ok_or_else(|| crate::compat::ocr_missing_message(""))?,
+        (_, p) => return Err(crate::compat::ocr_missing_message(&p.err().map(|e| e.message()).unwrap_or_default())),
+    };
     let buf = CryptographicBuffer::CreateFromByteArray(&img.bgra).map_err(e)?;
     let bmp = SoftwareBitmap::CreateCopyFromBuffer(&buf, BitmapPixelFormat::Bgra8, img.w, img.h).map_err(e)?;
     let res = engine.RecognizeAsync(&bmp).map_err(e)?.join().map_err(e)?;

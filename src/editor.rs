@@ -136,8 +136,8 @@ fn apply(blocks: &mut Vec<Block>, op: Op) {
             tree::remove(blocks, &p);
         }
         Op::Explode(p) => {
-            if let Some(Block::Recording { events, .. }) = tree::get(blocks, &p) {
-                let new = runner::explode(events);
+            if let Some(Block::Recording { events, elements, .. }) = tree::get(blocks, &p) {
+                let new = crate::uia_rec::upgrade_clicks(runner::explode(events), events, elements);
                 tree::splice(blocks, &p, new);
             }
         }
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn card_actions_work_on_nested_blocks() {
-        let rec = Block::Recording { events: vec![], speed: 1.0 };
+        let rec = Block::Recording { events: vec![], speed: 1.0, elements: vec![] };
         let mut t = vec![Block::Repeat { times: "2".into(), body: vec![log("a"), rec] }];
         let body = [(0, Slot::Body)];
         apply(&mut t, Op::Dup(Pos::new(&body, 0)));
