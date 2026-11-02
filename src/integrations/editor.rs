@@ -11,6 +11,7 @@ pub(super) const DESTS: &[(&str, fn() -> Dest)] = &[
     ("Comando", || Dest::Command(CommandDest::default())),
     ("Área de transferência", || Dest::Clipboard(ClipboardDest::default())),
     ("SQLite", || Dest::Sqlite(SqliteDest::default())),
+    ("ODBC (bancos instalados)", || Dest::Odbc(OdbcDest::default())),
 ];
 
 pub fn integrations_ui(ui: &mut Ui, list: &mut Vec<Integration>) {
@@ -137,6 +138,7 @@ fn dest_ui(ui: &mut Ui, d: &mut Dest, id: Id) {
         Dest::Command(c) => command_ui(ui, c),
         Dest::Clipboard(c) => clipboard_ui(ui, c, id),
         Dest::Sqlite(q) => sqlite_ui(ui, q),
+        Dest::Odbc(o) => odbc_ui(ui, o),
     }
 }
 
@@ -151,6 +153,20 @@ fn sql_edit(ui: &mut Ui, sql: &mut String) {
         te = te.text_color(RED);
     }
     ui.add(te).on_hover_text(tip);
+}
+
+fn odbc_ui(ui: &mut Ui, o: &mut OdbcDest) {
+    ui.horizontal(|ui| {
+        ui.label("conexão");
+        ui.add(egui::TextEdit::singleline(&mut o.connection).desired_width(360.0).hint_text("MeuBanco ou Driver={SQL Server};Server=.;Database=loja;Trusted_Connection=yes"));
+    });
+    ui.weak("um DSN (ex.: MeuBanco) ou uma string de conexão; uma senha aqui fica em texto puro no JSON do script");
+    sql_edit(ui, &mut o.sql);
+    ui.horizontal(|ui| {
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut o.timeout_ms).range(1000..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("mesmo contrato do SQLite: SELECT põe as linhas em JSON no resultado; os outros comandos põem as linhas afetadas em r_status");
 }
 
 fn sqlite_ui(ui: &mut Ui, q: &mut SqliteDest) {

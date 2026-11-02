@@ -64,6 +64,7 @@ A aba **Integrações** de cada script liga o fluxo a serviços externos sem tra
   - Comando: roda um programa sem janela de console, com argumentos que aceitam `{…}`. O envio vai pelo stdin, o stdout vai para a variável de resultado e o código de saída para `r_status`; se o timeout estoura, o processo é encerrado;
   - Área de transferência: escreve o envio ou lê o texto atual para a variável de resultado;
   - SQLite: um banco num arquivo `.db` (criado se faltar), com o SQLite embutido no exe. O SQL usa `:variavel`, ligado ao valor da variável com o tipo preservado e sem interpolação de texto (sem injeção). Um SELECT põe as linhas em JSON na variável de resultado (`json(r, "/0/nome")`); os outros comandos põem as linhas afetadas em `r_status`;
+  - ODBC: bancos já instalados no PC (SQL Server, MySQL, PostgreSQL, Access…) pelo gerenciador ODBC do Windows, com um DSN ou uma string de conexão. O SQL e o resultado seguem o mesmo contrato do SQLite. **Atenção:** uma senha na string de conexão (`PWD=…`) fica em texto puro no JSON do script; prefira um DSN ou a autenticação do Windows (`Trusted_Connection=yes`);
 - **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
 - **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
 
@@ -91,5 +92,5 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 ## Testes
 ```bash
 cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local)
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU, HTTPS real (viacep.com.br), área de transferência e arquivo somente leitura
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU, HTTPS real (viacep.com.br), área de transferência, arquivo somente leitura e banco ODBC real (defina ULTRATASK_ODBC_TESTE com um DSN ou uma string de conexão)
 ```

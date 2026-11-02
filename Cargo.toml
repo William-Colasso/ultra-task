@@ -8,6 +8,7 @@ eframe = { version = "0.37.0", default-features = false, features = ["default_fo
 egui = { version = "0.37.0", default-features = false, features = ["monochrome_emoji_fonts"] }
 evalexpr = "13.1.0"
 fastrand = "2.5.0"
+odbc-api = { version = "29.3.0", default-features = false, features = ["odbc_version_3_80"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

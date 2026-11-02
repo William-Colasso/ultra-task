@@ -15,6 +15,7 @@ pub mod editor;
 pub mod engine;
 pub mod file;
 pub mod http;
+pub mod odbc;
 pub mod sql;
 pub mod sqlite;
 
@@ -26,6 +27,7 @@ pub use clipboard::{ClipMode, ClipboardDest};
 pub use command::CommandDest;
 pub use file::{FileDest, FileMode};
 pub use http::{HttpDest, Method};
+pub use odbc::OdbcDest;
 pub use sqlite::SqliteDest;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -64,6 +66,7 @@ pub enum Dest {
     Command(CommandDest),
     Clipboard(ClipboardDest),
     Sqlite(SqliteDest),
+    Odbc(OdbcDest),
 }
 
 impl Dest {
@@ -74,6 +77,7 @@ impl Dest {
             Dest::Command(c) => c,
             Dest::Clipboard(c) => c,
             Dest::Sqlite(q) => q,
+            Dest::Odbc(o) => o,
         }
     }
 }

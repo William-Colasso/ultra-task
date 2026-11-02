@@ -342,6 +342,34 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 }
 ```
 
+**ODBC** (`Odbc`): `{"Odbc": {"connection": "MeuBanco", "sql": "SELECT nome FROM clientes WHERE id = :id", "timeout_ms": 15000}}`.
+- Para bancos já instalados no PC (SQL Server, MySQL, PostgreSQL, Access…), pelo gerenciador ODBC do Windows. Precisa do driver ODBC do banco instalado.
+- `connection`: o nome de um DSN (configurado em "Fontes de dados ODBC" do Windows) ou uma string de conexão, ex.: `Driver={ODBC Driver 18 for SQL Server};Server=.;Database=loja;Trusted_Connection=yes;TrustServerCertificate=yes`. Vai como está: **não** aceita `{expr}`, porque as chaves fazem parte da sintaxe do ODBC.
+- **Senha**: uma senha na `connection` (`PWD=…`) fica em texto puro no JSON do script. Prefira um DSN com autenticação do Windows (`Trusted_Connection=yes`) ou guarde a senha no DSN.
+- `sql`, `:variavel`, `timeout_ms` e o resultado seguem o mesmo contrato do **SQLite**: SELECT ➜ `r` = lista JSON de objetos e `r_status` = número de linhas; outros comandos ➜ `r_status` = linhas afetadas. `DECIMAL`/`NUMERIC` viram número quando cabem; datas voltam como texto.
+- Falha de conexão (DSN inexistente, driver ausente, senha errada, servidor fora) vai para o log e deixa `r_ok` falso.
+
+```json
+{
+  "name": "Estoque no SQL Server",
+  "integrations": [{
+    "name": "Consulta estoque",
+    "when": { "OnSet": ["codigo"] },
+    "dest": { "Odbc": { "connection": "Driver={ODBC Driver 18 for SQL Server};Server=.;Database=loja;Trusted_Connection=yes;TrustServerCertificate=yes", "sql": "SELECT descricao, quantidade FROM produtos WHERE codigo = :codigo", "timeout_ms": 15000 } },
+    "payload": { "Json": [] },
+    "result": "produto"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "codigo", "expr": "\"A-100\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!produto_pendente" }, "negate": false }, "timeout_ms": "20000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "produto_ok && produto_status > 0" }, "negate": false },
+        "then": [ { "Type": { "text": "{json(produto, \"/0/descricao\")}: {json(produto, \"/0/quantidade\")}" } } ],
+        "else_": [ { "Log": { "text": "produto não encontrado ou banco fora do ar" } } ] } }
+  ]
+}
+```
+
 ### Teclas (`vk`, decimal)
 
 | Teclas | Códigos |
