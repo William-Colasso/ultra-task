@@ -296,6 +296,52 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 }
 ```
 
+**SQLite** (`Sqlite`): `{"Sqlite": {"path": "dados.db", "sql": "SELECT nome FROM clientes WHERE id = :id", "timeout_ms": 10000}}`.
+- `path`: o arquivo `.db`, criado se faltar (com as pastas). Aceita `{expr}`; relativo parte da pasta do `ultratask.exe`. O SQLite vai embutido no exe.
+- `sql`: **um** comando. Os valores entram como `:variavel`, ligados ao valor atual da variável com o tipo preservado (inteiro, número, texto; booleano vira 1/0). O `sql` **não** aceita `{…}` e nunca recebe texto colado, então aspas e `;` nos valores não quebram nem injetam SQL. Não use `?`.
+- SELECT (ou qualquer comando que devolve colunas): `r` recebe as linhas como lista JSON de objetos, ex.: `[{"id":1,"nome":"Ana"}]`; leia com `json(r, "/0/nome")`. `r_status` = número de linhas. NULL vira `null` (e `json()` devolve `""`).
+- Outros comandos (INSERT, UPDATE, CREATE…): `r_status` (e `r`) = linhas afetadas.
+- Uma variável usada como `:variavel` precisa existir no instante do disparo; senão o envio falha e vai para o log.
+- Integrações diferentes gravando no mesmo arquivo esperam a vez (até `timeout_ms`), sem "database is locked".
+
+```json
+{
+  "name": "Cadastro local",
+  "integrations": [{
+    "name": "Tabela",
+    "when": { "OnSet": ["iniciar"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nome TEXT, saldo REAL)", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "tabela"
+  }, {
+    "name": "Insere",
+    "when": { "OnSet": ["nome"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "INSERT INTO clientes (nome, saldo) VALUES (:nome, :saldo)", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "ins"
+  }, {
+    "name": "Consulta",
+    "when": { "OnSet": ["buscar"] },
+    "dest": { "Sqlite": { "path": "dados/clientes.db", "sql": "SELECT id, nome, saldo FROM clientes WHERE nome = :buscar ORDER BY id DESC LIMIT 1", "timeout_ms": 5000 } },
+    "payload": { "Json": [] },
+    "result": "linhas"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "iniciar", "expr": "1" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!tabela_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "saldo", "expr": "10.5" } },
+    { "SetVar": { "name": "nome", "expr": "\"O'Brien; DROP TABLE clientes\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!ins_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "SetVar": { "name": "buscar", "expr": "nome" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!linhas_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "linhas_ok && linhas_status > 0" }, "negate": false },
+        "then": [ { "Log": { "text": "id {json(linhas, \"/0/id\")}, saldo {json(linhas, \"/0/saldo\")}" } } ],
+        "else_": [ { "Log": { "text": "não achou" } } ] } }
+  ]
+}
+```
+
 ### Teclas (`vk`, decimal)
 
 | Teclas | Códigos |

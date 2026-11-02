@@ -4,7 +4,8 @@
 //! - Ao gravar, JSON vira uma linha por envio, CSV ganha a linha de cabeçalho quando o
 //!   arquivo é novo (ou vazio), e texto vai como está.
 //! - `r` recebe o conteúdo lido (modo Ler) e `r_status` o número de bytes gravados ou lidos.
-use super::{Body, Destination, Job, Outcome, check_interp};
+use super::{Body, Destination, Job, Outcome, check_interp, eval_text};
+use evalexpr::HashMapContext;
 use crate::model::interpolate;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -78,7 +79,8 @@ impl Destination for FileDest {
         check_interp(errs, &format!("{path}.path"), &self.path);
     }
 
-    fn prepare(&self, body: Body, eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String> {
+    fn prepare(&self, body: Body, vars: &HashMapContext) -> Result<Job, String> {
+        let eval = &mut |e: &str| eval_text(vars, e);
         let p = interpolate(&self.path, eval)?;
         if p.trim().is_empty() {
             return Err("o caminho do arquivo ficou vazio".into());

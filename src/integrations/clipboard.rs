@@ -1,6 +1,7 @@
 //! Destino Área de transferência: escreve o envio como texto, ou lê o texto atual para `r`.
 //! `r_status` recebe o número de caracteres escritos ou lidos.
 use super::{Body, Destination, Job, Outcome};
+use evalexpr::HashMapContext;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
@@ -40,7 +41,7 @@ impl Destination for ClipboardDest {
 
     fn validate(&self, _path: &str, _errs: &mut Vec<String>) {}
 
-    fn prepare(&self, body: Body, _eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String> {
+    fn prepare(&self, body: Body, _vars: &HashMapContext) -> Result<Job, String> {
         let mode = self.mode;
         Ok(Box::new(move || {
             let r = match mode {

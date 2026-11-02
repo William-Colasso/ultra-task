@@ -10,6 +10,7 @@ pub(super) const DESTS: &[(&str, fn() -> Dest)] = &[
     ("Arquivo", || Dest::File(FileDest::default())),
     ("Comando", || Dest::Command(CommandDest::default())),
     ("Área de transferência", || Dest::Clipboard(ClipboardDest::default())),
+    ("SQLite", || Dest::Sqlite(SqliteDest::default())),
 ];
 
 pub fn integrations_ui(ui: &mut Ui, list: &mut Vec<Integration>) {
@@ -135,7 +136,34 @@ fn dest_ui(ui: &mut Ui, d: &mut Dest, id: Id) {
         Dest::File(f) => file_ui(ui, f, id),
         Dest::Command(c) => command_ui(ui, c),
         Dest::Clipboard(c) => clipboard_ui(ui, c, id),
+        Dest::Sqlite(q) => sqlite_ui(ui, q),
     }
+}
+
+/// Campo do SQL: vermelho se usar `?`; a dica lista os parâmetros `:variavel`.
+fn sql_edit(ui: &mut Ui, sql: &mut String) {
+    let mut errs = vec![];
+    sql::validate_sql("", sql, &mut errs);
+    let names = sql::param_names(sql);
+    let tip = if names.is_empty() { "valores entram como :variavel (ligados pelo nome, sem interpolação)".to_string() } else { format!("parâmetros: {}", names.iter().map(|n| format!(":{n}")).collect::<Vec<_>>().join(", ")) };
+    let mut te = egui::TextEdit::multiline(sql).desired_rows(3).desired_width(420.0).code_editor().hint_text("SELECT nome FROM clientes WHERE id = :id");
+    if !errs.is_empty() {
+        te = te.text_color(RED);
+    }
+    ui.add(te).on_hover_text(tip);
+}
+
+fn sqlite_ui(ui: &mut Ui, q: &mut SqliteDest) {
+    ui.horizontal(|ui| {
+        ui.label("arquivo .db");
+        interp_edit(ui, &mut q.path, 300.0, false);
+    });
+    sql_edit(ui, &mut q.sql);
+    ui.horizontal(|ui| {
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut q.timeout_ms).range(1..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("SELECT põe as linhas em JSON no resultado (ex.: json(r, \"/0/nome\")); os outros comandos põem as linhas afetadas em r_status");
 }
 
 fn command_ui(ui: &mut Ui, c: &mut CommandDest) {

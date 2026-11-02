@@ -1,7 +1,7 @@
 //! Execução das integrações de um script: dispara, entrega em threads e devolve as respostas
 //! para as variáveis. Quem chama é o interpretador, sempre na thread do fluxo; as entregas
 //! nunca tocam nas variáveis diretamente.
-use super::{Integration, Outcome, When, eval_text, result_vars};
+use super::{Integration, Outcome, When, result_vars};
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -57,7 +57,7 @@ impl Engine {
     /// Dispara a integração `idx` com os valores atuais. `r_pendente` vira verdadeiro já aqui.
     fn fire(&mut self, idx: usize, vars: &mut HashMapContext, log: &mut dyn FnMut(String)) {
         let it = &self.list[idx];
-        let job = it.payload.render(vars).and_then(|b| it.dest.get().prepare(b, &mut |e| eval_text(vars, e)));
+        let job = it.payload.render(vars).and_then(|b| it.dest.get().prepare(b, vars));
         let slot = &mut self.slots[idx];
         slot.seq += 1;
         let seq = slot.seq;

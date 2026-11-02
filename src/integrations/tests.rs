@@ -283,7 +283,7 @@ impl ClockIo {
     fn new() -> Self {
         ClockIo { t0: Instant::now(), typed: vec![] }
     }
-    fn texts(&self) -> Vec<&str> {
+    pub(super) fn texts(&self) -> Vec<&str> {
         self.typed.iter().map(|t| t.1.as_str()).collect()
     }
 }

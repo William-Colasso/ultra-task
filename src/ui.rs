@@ -1281,6 +1281,8 @@ mod tests {
             include_str!("integrations/file.rs"),
             include_str!("integrations/http.rs"),
             include_str!("integrations/mod.rs"),
+            include_str!("integrations/sql.rs"),
+            include_str!("integrations/sqlite.rs"),
             include_str!("main.rs"),
             include_str!("manual.rs"),
             include_str!("model.rs"),

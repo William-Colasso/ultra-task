@@ -4,7 +4,8 @@
 //!   vai para `r_status` (`r_ok` é verdadeiro só com 0).
 //! - Se o timeout estoura, o processo e os filhos dele (num job object) são encerrados.
 //! - A pasta de trabalho é a do exe.
-use super::{Body, Destination, Job, Outcome, check_interp};
+use super::{Body, Destination, Job, Outcome, check_interp, eval_text};
+use evalexpr::HashMapContext;
 use crate::model::interpolate;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -51,7 +52,8 @@ impl Destination for CommandDest {
         }
     }
 
-    fn prepare(&self, body: Body, eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String> {
+    fn prepare(&self, body: Body, vars: &HashMapContext) -> Result<Job, String> {
+        let eval = &mut |e: &str| eval_text(vars, e);
         let program = interpolate(&self.program, &mut *eval)?.trim().to_string();
         if program.is_empty() {
             return Err("o programa ficou vazio".into());

@@ -63,6 +63,7 @@ A aba **Integrações** de cada script liga o fluxo a serviços externos sem tra
   - Arquivo: acrescenta, sobrescreve ou lê um arquivo de texto (a leitura vai para a variável de resultado). O caminho aceita `{…}`, um caminho relativo parte da pasta do exe, e as pastas que faltam são criadas. JSON grava uma linha por envio, CSV grava o cabeçalho quando o arquivo é novo, e texto vai como está;
   - Comando: roda um programa sem janela de console, com argumentos que aceitam `{…}`. O envio vai pelo stdin, o stdout vai para a variável de resultado e o código de saída para `r_status`; se o timeout estoura, o processo é encerrado;
   - Área de transferência: escreve o envio ou lê o texto atual para a variável de resultado;
+  - SQLite: um banco num arquivo `.db` (criado se faltar), com o SQLite embutido no exe. O SQL usa `:variavel`, ligado ao valor da variável com o tipo preservado e sem interpolação de texto (sem injeção). Um SELECT põe as linhas em JSON na variável de resultado (`json(r, "/0/nome")`); os outros comandos põem as linhas afetadas em `r_status`;
 - **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
 - **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
 

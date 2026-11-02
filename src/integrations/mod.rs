@@ -15,6 +15,8 @@ pub mod editor;
 pub mod engine;
 pub mod file;
 pub mod http;
+pub mod sql;
+pub mod sqlite;
 
 use crate::model::{expr_error, interpolate, is_ident};
 use evalexpr::{Context, HashMapContext, Value};
@@ -24,6 +26,7 @@ pub use clipboard::{ClipMode, ClipboardDest};
 pub use command::CommandDest;
 pub use file::{FileDest, FileMode};
 pub use http::{HttpDest, Method};
+pub use sqlite::SqliteDest;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -60,6 +63,7 @@ pub enum Dest {
     File(FileDest),
     Command(CommandDest),
     Clipboard(ClipboardDest),
+    Sqlite(SqliteDest),
 }
 
 impl Dest {
@@ -69,6 +73,7 @@ impl Dest {
             Dest::File(f) => f,
             Dest::Command(c) => c,
             Dest::Clipboard(c) => c,
+            Dest::Sqlite(q) => q,
         }
     }
 }
@@ -119,9 +124,10 @@ pub trait Destination {
     fn kind(&self) -> &'static str;
     /// Problemas de configuração, cada um prefixado por `path` (ex.: `integrations[0].dest.Http`).
     fn validate(&self, path: &str, errs: &mut Vec<String>);
-    /// Roda na thread do fluxo, no instante do disparo: resolve os `{…}` com `eval` e devolve o
-    /// trabalho que vai rodar em segundo plano.
-    fn prepare(&self, body: Body, eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String>;
+    /// Roda na thread do fluxo, no instante do disparo: resolve os `{…}` com `eval_text(vars, …)`
+    /// (ou lê os valores tipados, como os parâmetros SQL) e devolve o trabalho que vai rodar em
+    /// segundo plano.
+    fn prepare(&self, body: Body, vars: &HashMapContext) -> Result<Job, String>;
     /// Limite de uma entrega; também limita a espera do gatilho "ao terminar".
     fn timeout_ms(&self) -> u64;
 }
