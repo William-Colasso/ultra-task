@@ -11,12 +11,14 @@
 
 pub mod editor;
 pub mod engine;
+pub mod file;
 pub mod http;
 
 use crate::model::{expr_error, interpolate, is_ident};
 use evalexpr::{Context, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
 
+pub use file::{FileDest, FileMode};
 pub use http::{HttpDest, Method};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -51,12 +53,14 @@ pub enum When {
 #[serde(deny_unknown_fields)]
 pub enum Dest {
     Http(HttpDest),
+    File(FileDest),
 }
 
 impl Dest {
     pub fn get(&self) -> &dyn Destination {
         match self {
             Dest::Http(h) => h,
+            Dest::File(f) => f,
         }
     }
 }
@@ -77,6 +81,8 @@ pub enum Payload {
 pub struct Body {
     pub content_type: &'static str,
     pub text: String,
+    /// Linha de cabeçalho do CSV (os nomes das variáveis); `None` nos outros formatos.
+    pub header: Option<String>,
 }
 
 /// Como terminou uma entrega. Vira `r`, `r_ok` e `r_status`.
@@ -162,13 +168,14 @@ impl Payload {
                 for n in names {
                     fields.push(format!("{}:{}", serde_json::Value::String(n.clone()), to_json(var(vars, n)?)));
                 }
-                Body { content_type: "application/json; charset=utf-8", text: format!("{{{}}}", fields.join(",")) }
+                Body { content_type: "application/json; charset=utf-8", text: format!("{{{}}}", fields.join(",")), header: None }
             }
             Payload::Csv(names) => {
                 let fields: Result<Vec<String>, String> = names.iter().map(|n| var(vars, n).map(csv_field)).collect();
-                Body { content_type: "text/csv; charset=utf-8", text: fields?.join(",") }
+                let header = names.iter().map(|n| csv_field(&Value::String(n.clone()))).collect::<Vec<_>>().join(",");
+                Body { content_type: "text/csv; charset=utf-8", text: fields?.join(","), header: Some(header) }
             }
-            Payload::Text(t) => Body { content_type: "text/plain; charset=utf-8", text: interpolate(t, |e| eval_text(vars, e))? },
+            Payload::Text(t) => Body { content_type: "text/plain; charset=utf-8", text: interpolate(t, |e| eval_text(vars, e))?, header: None },
         })
     }
 }

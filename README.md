@@ -58,7 +58,9 @@ O tema (sistema/claro/escuro) fica em Ajustes ou no botão ☀/🌙 da barra.
 ### Integrações
 A aba **Integrações** de cada script liga o fluxo a serviços externos sem travá-lo. Cada integração tem:
 - **gatilho**: quando um bloco define certas variáveis, a cada N segundos, ou ao terminar a execução;
-- **destino**: por enquanto REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
+- **destino**:
+  - REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
+  - Arquivo: acrescenta, sobrescreve ou lê um arquivo de texto (a leitura vai para a variável de resultado). O caminho aceita `{…}`, um caminho relativo parte da pasta do exe, e as pastas que faltam são criadas. JSON grava uma linha por envio, CSV grava o cabeçalho quando o arquivo é novo, e texto vai como está;
 - **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
 - **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
 

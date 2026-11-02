@@ -1276,6 +1276,7 @@ mod tests {
             include_str!("humanmouse.rs"),
             include_str!("integrations/editor.rs"),
             include_str!("integrations/engine.rs"),
+            include_str!("integrations/file.rs"),
             include_str!("integrations/http.rs"),
             include_str!("integrations/mod.rs"),
             include_str!("main.rs"),

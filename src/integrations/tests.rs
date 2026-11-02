@@ -73,7 +73,7 @@ fn rejects_unknown_fields() {
     }
     // Campos omitidos usam o padrão.
     let s: Script = serde_json::from_str(r#"{"name":"x","integrations":[{"name":"a","when":"OnEnd","dest":{"Http":{"url":"http://a/b"}}}]}"#).unwrap();
-    let Dest::Http(h) = &s.integrations[0].dest;
+    let Dest::Http(h) = &s.integrations[0].dest else { panic!() };
     assert_eq!((h.method, h.timeout_ms, s.integrations[0].result.clone()), (Method::Get, 10000, None));
 }
 
@@ -114,7 +114,7 @@ fn validator() {
     assert!(errs[11].contains("r3_pendente"), "{}", errs[11]);
 }
 
-fn ctx(pairs: &[(&str, Value)]) -> HashMapContext {
+pub(super) fn ctx(pairs: &[(&str, Value)]) -> HashMapContext {
     use evalexpr::ContextWithMutableVariables;
     let mut c = HashMapContext::new();
     for (k, v) in pairs {
@@ -271,7 +271,7 @@ impl Io for FakeIo {
 }
 
 /// Relógio real: as respostas HTTP chegam em tempo real, então as esperas também são reais.
-struct ClockIo {
+pub(super) struct ClockIo {
     t0: Instant,
     typed: Vec<(u64, String)>,
 }
@@ -400,31 +400,31 @@ impl Server {
     }
 }
 
-fn set(n: &str, e: &str) -> Block {
+pub(super) fn set(n: &str, e: &str) -> Block {
     Block::SetVar { name: n.into(), expr: e.into() }
 }
-fn ty(t: &str) -> Block {
+pub(super) fn ty(t: &str) -> Block {
     Block::Type { text: t.into() }
 }
-fn expr(e: &str) -> Condition {
+pub(super) fn expr(e: &str) -> Condition {
     Condition { kind: CondKind::Expr(e.into()), negate: false }
 }
-fn wait_until(e: &str, ms: u32) -> Block {
+pub(super) fn wait_until(e: &str, ms: u32) -> Block {
     Block::WaitUntil { cond: expr(e), timeout_ms: ms.to_string(), on_timeout: OnTimeout::Stop }
 }
 fn http(method: Method, url: String) -> Dest {
     Dest::Http(HttpDest { method, url, headers: vec![], timeout_ms: 5000 })
 }
 
-struct Run {
-    io: ClockIo,
-    result: Result<(), Halt>,
-    logs: Vec<String>,
-    vars: Vec<(String, String)>,
+pub(super) struct Run {
+    pub(super) io: ClockIo,
+    pub(super) result: Result<(), Halt>,
+    pub(super) logs: Vec<String>,
+    pub(super) vars: Vec<(String, String)>,
 }
 
 /// Roda `blocks` como o script de cima, com `integrations` ativas, e depois o "ao terminar".
-fn run(integrations: Vec<Integration>, blocks: Vec<Block>, others: Vec<Script>) -> Run {
+pub(super) fn run(integrations: Vec<Integration>, blocks: Vec<Block>, others: Vec<Script>) -> Run {
     let mut io = ClockIo::new();
     let stop = AtomicBool::new(false);
     let dbg = Debug::default();
@@ -441,7 +441,7 @@ fn run(integrations: Vec<Integration>, blocks: Vec<Block>, others: Vec<Script>) 
     Run { io, result, logs, vars }
 }
 
-fn var<'a>(r: &'a Run, name: &str) -> &'a str {
+pub(super) fn var<'a>(r: &'a Run, name: &str) -> &'a str {
     r.vars.iter().find(|v| v.0 == name).map_or("<ausente>", |v| v.1.as_str())
 }
 

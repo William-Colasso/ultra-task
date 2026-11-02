@@ -5,7 +5,10 @@ use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui};
 const RED: Color32 = Color32::from_rgb(230, 60, 60);
 
 /// Destinos oferecidos no editor: rótulo + valor novo. Um destino novo entra aqui e em `dest_ui`.
-const DESTS: &[(&str, fn() -> Dest)] = &[("REST (HTTP/HTTPS)", || Dest::Http(HttpDest::default()))];
+const DESTS: &[(&str, fn() -> Dest)] = &[
+    ("REST (HTTP/HTTPS)", || Dest::Http(HttpDest::default())),
+    ("Arquivo", || Dest::File(FileDest::default())),
+];
 
 pub fn integrations_ui(ui: &mut Ui, list: &mut Vec<Integration>) {
     ui.weak("As integrações rodam em paralelo e nunca travam os blocos. O fluxo reage pelas variáveis de resultado (ex.: Esperar até !r_pendente).");
@@ -127,7 +130,23 @@ fn dest_ui(ui: &mut Ui, d: &mut Dest, id: Id) {
     });
     match d {
         Dest::Http(h) => http_ui(ui, h, id),
+        Dest::File(f) => file_ui(ui, f, id),
     }
+}
+
+fn file_ui(ui: &mut Ui, f: &mut FileDest, id: Id) {
+    ui.horizontal(|ui| {
+        ComboBox::from_id_salt(id.with("mode")).width(110.0).selected_text(f.mode.label()).show_ui(ui, |ui| {
+            for m in FileMode::ALL {
+                ui.selectable_value(&mut f.mode, m, m.label());
+            }
+        });
+        interp_edit(ui, &mut f.path, 340.0, false);
+    });
+    ui.weak(match f.mode {
+        FileMode::Read => "lê o arquivo inteiro para a variável de resultado (o envio é ignorado)",
+        _ => "caminho relativo parte da pasta do exe; JSON grava uma linha por envio, CSV ganha cabeçalho no arquivo novo",
+    });
 }
 
 fn http_ui(ui: &mut Ui, h: &mut HttpDest, id: Id) {

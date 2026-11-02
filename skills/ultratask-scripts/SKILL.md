@@ -171,14 +171,14 @@ Uma integração envia dados para fora **em paralelo**: os blocos seguintes não
 |---|---|
 | `name` | texto não vazio; aparece no log |
 | `when` | `{"OnSet": ["a", "b"]}`: quando um bloco `SetVar`/`OcrToVar` define uma dessas variáveis. `{"Every": {"s": 5.0}}`: a cada N segundos enquanto o script roda (pula se o envio anterior ainda não voltou). `"OnEnd"`: uma vez depois do último bloco; a execução espera a resposta até `timeout_ms` |
-| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string) |
+| `dest` | `{"Http": {"method", "url", "headers", "timeout_ms"}}`. `method`: `"GET"`, `"POST"`, `"PUT"`, `"PATCH"` ou `"DELETE"`. `url` e os valores de `headers` aceitam `{expr}`. `headers` é uma lista de pares: `[["Authorization", "Bearer {token}"]]`. `timeout_ms` é um **número** (não string). Outros destinos: veja *Outros destinos* abaixo |
 | `payload` | `{"Json": ["a", "b"]}` envia `{"a": …, "b": …}` (números continuam números). `{"Csv": ["a", "b"]}` envia uma linha CSV. `{"Text": "pedido {n}"}` envia o texto interpolado. Em `GET` o corpo não vai: ponha os valores na `url` |
 | `result` | nome de variável ou `null` |
 
 Para `"result": "r"`, o app cria, desde o início da execução:
 - `r`: o corpo da resposta (texto);
 - `r_ok`: `true` quando o status é 2xx;
-- `r_status`: o status HTTP, ou `0` em erro de rede;
+- `r_status`: o status HTTP, ou `0` em erro de rede (cada destino em *Outros destinos* diz o que vai aqui);
 - `r_pendente`: vira `true` no instante do disparo (ainda dentro do bloco que definiu a variável) e `false` quando a resposta chega.
 
 Regras:
@@ -220,6 +220,40 @@ Exemplo: consulta o CEP e digita a rua, ou avisa se não achou:
         "cond": { "kind": { "Expr": "endereco_ok && rua != \"\"" }, "negate": false },
         "then": [ { "Type": { "text": "Rua: {rua}" } } ],
         "else_": [ { "Log": { "text": "CEP não encontrado (status {endereco_status})" } } ] } }
+  ]
+}
+```
+
+#### Outros destinos
+
+Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em erro, `r_ok` fica `false`, `r_status` fica `0` e a mensagem vai para o log.
+
+**Arquivo** (`File`): `{"File": {"path": "dados/{dia}.csv", "mode": "Append"}}`.
+- `path` aceita `{expr}`; um caminho relativo parte da pasta do `ultratask.exe`; as pastas que faltam são criadas.
+- `mode`: `"Append"` (acrescenta no fim), `"Overwrite"` (troca o conteúdo) ou `"Read"` (lê o arquivo inteiro para `r`; o `payload` é ignorado).
+- Ao gravar: `Json` grava uma linha por envio; `Csv` grava a linha com os nomes das variáveis quando o arquivo é novo (ou vazio) e depois uma linha por envio; `Text` grava o texto como está, sem quebra de linha. As linhas de `Json` e `Csv` terminam em CRLF.
+- `r_status`: bytes gravados ou lidos. `r`: o conteúdo lido (vazio ao gravar).
+
+```json
+{
+  "name": "Planilha de pedidos",
+  "integrations": [{
+    "name": "Grava pedido",
+    "when": { "OnSet": ["pedido"] },
+    "dest": { "File": { "path": "relatorios/pedidos.csv", "mode": "Append" } },
+    "payload": { "Csv": ["pedido", "cliente", "valor"] },
+    "result": null
+  }, {
+    "name": "Lê pedidos",
+    "when": "OnEnd",
+    "dest": { "File": { "path": "relatorios/pedidos.csv", "mode": "Read" } },
+    "payload": { "Text": "" },
+    "result": "planilha"
+  }],
+  "blocks": [
+    { "SetVar": { "name": "cliente", "expr": "\"Ana\"" } },
+    { "SetVar": { "name": "valor", "expr": "19.9" } },
+    { "SetVar": { "name": "pedido", "expr": "1001" } }
   ]
 }
 ```
