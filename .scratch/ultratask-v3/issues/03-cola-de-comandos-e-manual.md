@@ -81,6 +81,10 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu`, testes no Wine), confor
 - `manual::block_help` tem um braço `_` (com `#[allow(unreachable_patterns)]`), para que variantes de `Block` vindas de outros tickets compilem no merge. O teste `sections_have_content` acusa bloco sem texto.
 - O formato do JSON não mudou. SKILL.md e README não precisaram de alteração: a skill já cita todas as funções do catálogo.
 
+### Complemento na integração com o ticket 09
+- No merge do 09 (`merge: ticket 09`), `catalog::script_vars` passou a listar as variáveis de resultado das integrações (`r`, `r_ok`, `r_status`, `r_pendente`); teste `catalog::tests::integration_result_vars_are_listed`.
+- `json()` foi para `runner::custom_functions()` e para `catalog::FUNCTIONS` (antes era registrada à parte em `integrations::register_functions`, que saiu).
+
 ### Pendente no Windows
 1. `cargo build --release` (MSVC) e `cargo test` no Windows.
 2. Manual pela barra e pelo "?" (critério 4), e aparência:

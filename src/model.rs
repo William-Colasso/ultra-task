@@ -256,6 +256,9 @@ pub struct Script {
     /// Mover/Clique/Rolar levam o ponteiro por um trajeto humano em vez de teletransportar.
     pub human_mouse: bool,
     pub blocks: Vec<Block>,
+    /// Aba Integrações: rodam em paralelo ao fluxo (veja `integrations`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<crate::integrations::Integration>,
 }
 
 impl Default for Script {
@@ -273,6 +276,7 @@ impl Default for Script {
             trace: false,
             human_mouse: false,
             blocks: vec![],
+            integrations: vec![],
         }
     }
 }
@@ -443,7 +447,7 @@ pub fn expr_error(s: &str) -> Option<String> {
     }
 }
 
-fn is_ident(s: &str) -> bool {
+pub fn is_ident(s: &str) -> bool {
     let mut c = s.chars();
     c.next().is_some_and(|f| f.is_alphabetic() || f == '_') && c.all(|ch| ch.is_alphanumeric() || ch == '_')
 }
@@ -464,6 +468,7 @@ pub fn validate(s: &Script, known: &[String]) -> Vec<String> {
         errs.push("trigger: gatilhos precisam de um target".into());
     }
     validate_blocks(&s.blocks, "blocks", known, &mut errs);
+    crate::integrations::validate(&s.integrations, &mut errs);
     errs
 }
 

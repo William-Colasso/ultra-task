@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 enum Tab {
     Blocks,
     Config,
+    Integrations,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -690,6 +691,7 @@ impl App {
             ui.add_space(16.0);
             ui.selectable_value(&mut self.tab, Tab::Blocks, "Blocos");
             ui.selectable_value(&mut self.tab, Tab::Config, "Config");
+            ui.selectable_value(&mut self.tab, Tab::Integrations, "Integrações");
         });
         ui.separator();
         // ponytail: change detection by comparing against a clone; cheap since egui only repaints on input.
@@ -707,6 +709,9 @@ impl App {
                 });
             }
             Tab::Config => egui::ScrollArea::vertical().show(ui, |ui| self.config_ui(ui, i)).inner,
+            Tab::Integrations => {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| crate::integrations::editor::integrations_ui(ui, &mut self.scripts[i].integrations));
+            }
         }
         if self.scripts[i] != before {
             self.dirty = true;
@@ -1269,6 +1274,10 @@ mod tests {
             include_str!("cola.rs"),
             include_str!("editor.rs"),
             include_str!("humanmouse.rs"),
+            include_str!("integrations/editor.rs"),
+            include_str!("integrations/engine.rs"),
+            include_str!("integrations/http.rs"),
+            include_str!("integrations/mod.rs"),
             include_str!("main.rs"),
             include_str!("manual.rs"),
             include_str!("model.rs"),

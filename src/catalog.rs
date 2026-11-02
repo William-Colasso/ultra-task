@@ -22,6 +22,7 @@ const fn f(name: &'static str, sig: &'static str, desc: &'static str, example: &
 pub const FUNCTIONS: &[FnDoc] = &[
     f("rand", "rand(a, b)", "inteiro sorteado entre a e b, inclusive", "rand(1, 6)", true),
     f("contem", "contem(texto, trecho)", "verdadeiro se o texto contém o trecho (sem diferenciar maiúsculas)", "contem(\"Olá Mundo\", \"mundo\")", true),
+    f("json", "json(texto, \"/caminho\")", "campo de um JSON por JSON Pointer (ex.: resposta de integração)", "json(\"{\\\"a\\\": [1, 2]}\", \"/a/1\")", true),
     f("min", "min(a, b, …)", "o menor dos valores", "min(3, 1, 2)", false),
     f("max", "max(a, b, …)", "o maior dos valores", "max(3, 1, 2)", false),
     f("floor", "floor(x)", "arredonda para baixo", "floor(2.7)", false),
@@ -231,6 +232,12 @@ pub fn script_vars(script: &Script, all: &[Script]) -> Vec<String> {
         }
     }
     let mut out = std::collections::BTreeSet::new();
+    // Variáveis de resultado das integrações (ticket 09): r, r_ok, r_status e r_pendente.
+    for r in script.integrations.iter().filter_map(|i| i.result.as_deref()).filter(|r| !r.trim().is_empty()) {
+        for suf in ["", "_ok", "_status", "_pendente"] {
+            out.insert(format!("{}{suf}", r.trim()));
+        }
+    }
     walk(&script.blocks, all, &mut vec![script.name.as_str()], &mut out);
     out.into_iter().collect()
 }
@@ -346,5 +353,15 @@ mod tests {
         };
         let all = vec![main.clone(), sub];
         assert_eq!(script_vars(&main, &all), ["a", "b", "do_sub", "lido"]);
+    }
+
+    #[test]
+    fn integration_result_vars_are_listed() {
+        let mut sc = Script::default();
+        sc.integrations.push(crate::integrations::Integration { result: Some("endereco".into()), ..Default::default() });
+        let v = script_vars(&sc, &[]);
+        for n in ["endereco", "endereco_ok", "endereco_status", "endereco_pendente"] {
+            assert!(v.iter().any(|x| x == n), "{n} faltou em {v:?}");
+        }
     }
 }

@@ -5,6 +5,7 @@ mod cola;
 mod editor;
 mod hooks;
 mod humanmouse;
+mod integrations;
 mod manual;
 mod model;
 mod runner;
