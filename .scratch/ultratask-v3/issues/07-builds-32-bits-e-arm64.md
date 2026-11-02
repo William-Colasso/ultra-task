@@ -24,7 +24,7 @@ Leia antes: `../CONVENCOES.md`.
 Feito num container Linux (alvos `*-windows-gnu`/`gnullvm` + Wine), ver `../AMBIENTE-LINUX.md`. Nenhum critério dá para marcar aqui: todos dependem do MSVC, de WoW64 real ou de uma máquina ARM64.
 
 **Commits**
-- (este commit) feat: builds de release x64, x86 e ARM64 com um comando
+- `3463e69` feat: builds de release x64, x86 e ARM64 com um comando
 
 **Arquivos tocados**
 - `.cargo/config.toml` (compartilhado): alias `cargo build-all` (os 3 alvos MSVC num só `cargo build --release`, que aceita vários `--target`); manifesto `asInvoker` embutido só no exe MSVC x86 (`/MANIFEST:EMBED /MANIFESTUAC:level='asInvoker'`).
