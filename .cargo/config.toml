@@ -16,3 +16,6 @@ rustflags = ["-C", "link-arg=/MANIFEST:EMBED", "-C", "link-arg=/MANIFESTUAC:leve
 # Ticket 07: `cargo build-all` gera os exes de release x64, x86 (32 bits) e ARM64 em
 # target\<alvo>\release\ultratask.exe. Alvos e componente do VS Build Tools: ver README.
 build-all = "build --release --target x86_64-pc-windows-msvc --target i686-pc-windows-msvc --target aarch64-pc-windows-msvc"
+# Ticket 08 (melhor esforço): exes para Windows 8.1 (e 7, ver README) com os alvos *-win7 do
+# Rust, que exigem o nightly com rust-src: `cargo +nightly build-win7`.
+build-win7 = "build --release -Z build-std --target x86_64-win7-windows-msvc --target i686-win7-windows-msvc"

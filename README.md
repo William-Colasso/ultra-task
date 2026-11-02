@@ -8,7 +8,23 @@ A diferença principal é que cada script roda **numa janela-alvo** e, no modo S
   - Não depende do runtime do Visual C++ (o CRT vai embutido no exe) e só usa DLLs que vêm com o Windows.
   - Funciona sem placa de vídeo (VM, área de trabalho remota, Windows Sandbox sem vGPU). Se o OpenGL não abrir, o UltraTask se reabre sozinho com `--render-software`, que desenha a janela com Direct3D 12 por software (WARP, que vem no Windows). Esse argumento também pode ser passado à mão.
   - Os blocos e condições de OCR precisam de um idioma com OCR no Windows. Sem nenhum, eles falham com uma mensagem que diz como instalar: **Configurações > Hora e idioma > Idioma e região > Português (Brasil) > Opções de idioma > Reconhecimento óptico de caracteres**, ou, no PowerShell como administrador, `Add-WindowsCapability -Online -Name "Language.OCR~~~pt-BR~0.0.1.0"`.
+- Windows 8.1 e 7 SP1: só com o build próprio (ver [Windows 7 e 8.1](#windows-7-e-81-melhor-esforço)), com menos recursos (tabela abaixo).
 - Scripts e ajustes ficam ao lado do exe. Se essa pasta não aceita escrita (ex.: `C:\Program Files`), o UltraTask avisa no log e usa `%LOCALAPPDATA%\UltraTask`.
+
+### Recursos por versão do Windows
+| Recurso | Windows 10 e 11 | Windows 8.1 (build Win7) | Windows 7 SP1 (build Win7) |
+|---|---|---|---|
+| Abrir, gravar e tocar (Segundo plano e Foco) | sim | sim | não: o exe não abre (falta `combase.dll`, ver abaixo) |
+| Exe normal (`cargo build --release`, `cargo build-all`) | sim | não: a biblioteca padrão do Rust usa APIs do Windows 10 | não |
+| Janela por OpenGL (com placa de vídeo) | sim | sim | — |
+| Janela sem placa de vídeo (`--render-software`, Direct3D 12/WARP) | sim | não: caixa de erro "não conseguiu abrir a janela (Direct3D 12 / WARP)" | — |
+| OCR (blocos e condições) | sim, com um idioma de OCR instalado | não: o bloco para com "OCR indisponível: … só existe no Windows 10 e 11", a condição avisa e conta como falsa | — |
+| Captura de janela coberta (Windows Graphics Capture) | 10 1903 ou mais novo | não: continua no `PrintWindow` e o log avisa | — |
+| Elementos (UI Automation) | sim | sim | — |
+| Modo Navegador (CDP) | sim | sim, com um navegador que ainda rode no 8.1 (Chrome/Edge 109) | — |
+| Integrações, exportar .exe, gatilhos, bandeja | sim | sim | — |
+
+O recurso que falta não derruba o app: a mensagem vai para o log (ou para a caixa de erro, no caso da janela) e o resto continua funcionando.
 
 ## Build
 
@@ -46,6 +62,19 @@ cargo build-all
 | ARM64 | `target\aarch64-pc-windows-msvc\release\ultratask.exe` |
 
 Os três têm o CRT embutido e o mesmo fallback de renderização por software. O exe x86 leva um manifesto `asInvoker`, para que o Windows não desvie a gravação dos scripts para o `VirtualStore` quando ele estiver em Arquivos de Programas. Para testar o x86: `cargo test --target i686-pc-windows-msvc`.
+
+### Windows 7 e 8.1 (melhor esforço)
+O Rust só gera exes para o 7 e o 8.1 com os alvos `*-win7-windows-msvc`, que exigem o nightly e recompilam a biblioteca padrão:
+
+```powershell
+rustup toolchain install nightly --component rust-src
+cargo +nightly build-win7
+```
+
+Os exes ficam em `target\x86_64-win7-windows-msvc\release\ultratask.exe` e `target\i686-win7-windows-msvc\release\ultratask.exe` (o x86 com o mesmo manifesto do build de 32 bits).
+
+No **Windows 8.1** eles abrem, gravam e tocam, sem os recursos marcados "não" na tabela acima.
+No **Windows 7** eles ainda não abrem: a crate `windows` 0.62 (usada pelo UltraTask, pelo wgpu e pelo eframe) importa `combase.dll` (`CoIncrementMTAUsage`, `CoCreateFreeThreadedMarshaler`) e `api-ms-win-core-winrt-l1-1-0.dll` / `api-ms-win-core-winrt-error-l1-1-0.dll` (`RoGetActivationFactory`, `RoInitialize`, `RoOriginateErrorW`) direto na tabela de importação do exe, e essas DLLs só existem a partir do Windows 8. O Windows recusa o exe antes de qualquer código do UltraTask rodar, então não dá para desligar só o recurso. Resolver exigiria carregar essas DLLs sob demanda (`/DELAYLOAD`) e garantir que nada chame WinRT no Windows 7, inclusive dentro das dependências.
 
 ## Uso rápido
 

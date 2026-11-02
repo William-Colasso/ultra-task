@@ -162,6 +162,22 @@ pub fn choose_ocr(profile_engine_ok: bool, installed_langs: usize) -> OcrChoice 
     }
 }
 
+/// `REGDB_E_CLASSNOTREG`: a classe WinRT não existe neste Windows. É o que o Windows 8.1 devolve
+/// para `Windows.Media.Ocr.OcrEngine`, que só veio no Windows 10 (ticket 08).
+pub const CLASS_NOT_REGISTERED: i32 = 0x8004_0154_u32 as i32;
+
+/// Mensagem do OCR quando criar o motor falhou com `code`: sem o OCR no sistema, instalar um
+/// idioma não adianta, então a mensagem diz isso em vez de ensinar a instalar.
+pub fn ocr_failure_message(code: i32, detail: &str) -> String {
+    if code == CLASS_NOT_REGISTERED {
+        "OCR indisponível: o OCR do Windows (Windows.Media.Ocr) só existe no Windows 10 e 11. \
+         Os blocos e condições de OCR não funcionam nesta versão do Windows."
+            .to_string()
+    } else {
+        ocr_missing_message(detail)
+    }
+}
+
 pub fn ocr_missing_message(detail: &str) -> String {
     let mut m = "OCR indisponível: nenhum idioma com reconhecimento de texto (OCR) está instalado no Windows. \
                  Instale em Configurações > Hora e idioma > Idioma e região > Português (Brasil) > Opções de idioma > \
@@ -236,6 +252,10 @@ mod tests {
         let m = ocr_missing_message("");
         assert!(m.contains("Add-WindowsCapability") && m.contains("Configurações") && !m.ends_with(')'));
         assert!(ocr_missing_message("classe não registrada").ends_with("(classe não registrada)"));
+        // Windows 8.1: a classe do OCR não existe; instalar idioma não resolve.
+        let m = ocr_failure_message(CLASS_NOT_REGISTERED, "Classe não registrada");
+        assert!(m.starts_with("OCR") && m.contains("Windows 10 e 11") && !m.contains("Add-WindowsCapability"), "{m}");
+        assert_eq!(ocr_failure_message(0x8000_4005_u32 as i32, "x"), ocr_missing_message("x"));
     }
 
     /// O OCR de verdade nunca entra em pânico: lê (Windows com idioma de OCR) ou devolve uma
