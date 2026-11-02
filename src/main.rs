@@ -5,6 +5,7 @@ mod hooks;
 mod model;
 mod runner;
 mod ui;
+mod wgc;
 mod win;
 
 use std::sync::Arc;
