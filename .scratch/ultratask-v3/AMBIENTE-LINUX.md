@@ -14,6 +14,7 @@ o código foi compilado e testado lá, e o que isso prova ou não prova.
   LC_ALL=C.UTF-8 wine target/x86_64-pc-windows-gnu/debug/ultratask.exe --validate arquivo.json
   ```
 - Sem `LC_ALL=C.UTF-8`, nomes de arquivo com acento chegam estragados ao exe no Wine.
+- Se o `~/.wine` estiver quebrado (`could not load kernel32.dll`), use um prefixo próprio: `export WINEPREFIX=$PWD/.wine-teste` (é criado na primeira execução).
 - Para checar outros alvos sem linkar: `cargo check --target i686-pc-windows-gnu`.
 
 ## O que isso prova
