@@ -11,8 +11,9 @@ o código foi compilado e testado lá, e o que isso prova ou não prova.
   export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=wine WINEDEBUG=-all
   cargo test  --target x86_64-pc-windows-gnu
   cargo build --target x86_64-pc-windows-gnu
-  wine target/x86_64-pc-windows-gnu/debug/ultratask.exe --validate arquivo.json
+  LC_ALL=C.UTF-8 wine target/x86_64-pc-windows-gnu/debug/ultratask.exe --validate arquivo.json
   ```
+- Sem `LC_ALL=C.UTF-8`, nomes de arquivo com acento chegam estragados ao exe no Wine.
 - Para checar outros alvos sem linkar: `cargo check --target i686-pc-windows-gnu`.
 
 ## O que isso prova
