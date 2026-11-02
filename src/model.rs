@@ -1,3 +1,4 @@
+use crate::uia::{UiaAction, UiaElem, UiaTest};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -131,6 +132,13 @@ pub enum CondKind {
     WindowForeground,
     TitleMatches(String),
     Expr(String),
+    /// UI Automation element of the target window.
+    Uia {
+        #[serde(default)]
+        elem: UiaElem,
+        #[serde(default)]
+        test: UiaTest,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -150,7 +158,13 @@ impl Default for Condition {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum Block {
-    Recording { events: Vec<Event>, speed: f32 },
+    Recording {
+        events: Vec<Event>,
+        speed: f32,
+        /// UIA element of each recorded click (indices into `events`); used by "Explodir".
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        elements: Vec<crate::uia_rec::RecElem>,
+    },
     Move { x: String, y: String },
     Click { x: String, y: String, button: Btn, kind: ClickKind, jitter_px: u32 },
     Key { vk: u16, action: KeyAction },
@@ -163,6 +177,19 @@ pub enum Block {
     While { cond: Condition, body: Vec<Block> },
     SetVar { name: String, expr: String },
     OcrToVar { name: String, region: Region },
+    /// Acts on a control through UI Automation: no mouse or keyboard input at all.
+    Uia {
+        #[serde(default)]
+        elem: UiaElem,
+        #[serde(default)]
+        action: UiaAction,
+        /// expr: how long to wait for the element to appear.
+        #[serde(default = "crate::uia::default_timeout")]
+        timeout_ms: String,
+        /// Element not found: click the captured point instead of stopping with an error.
+        #[serde(default)]
+        fallback_click: bool,
+    },
     Call { script: String },
     Log { text: String },
     Breakpoint,
@@ -185,6 +212,7 @@ impl Block {
             Block::While { .. } => "Enquanto",
             Block::SetVar { .. } => "Definir variável",
             Block::OcrToVar { .. } => "Ler texto (OCR)",
+            Block::Uia { .. } => "Elemento (UIA)",
             Block::Call { .. } => "Chamar script",
             Block::Log { .. } => "Mostrar no log",
             Block::Breakpoint => "Breakpoint (pausar)",
@@ -195,7 +223,7 @@ impl Block {
     /// One line describing what the block does, for the debug panel and trace log.
     pub fn summary(&self) -> String {
         match self {
-            Block::Recording { events, speed } => format!("Reproduzir gravação ({} eventos, {speed}×)", events.len()),
+            Block::Recording { events, speed, .. } => format!("Reproduzir gravação ({} eventos, {speed}×)", events.len()),
             Block::Move { x, y } => format!("Mover para ({x}, {y})"),
             Block::Click { x, y, button, kind, .. } => format!("Clique {kind:?} {button:?} em ({x}, {y})"),
             Block::Key { vk, action } => format!("Tecla {} {action:?}", key_name(*vk)),
@@ -208,6 +236,7 @@ impl Block {
             Block::While { .. } => "Enquanto …".into(),
             Block::SetVar { name, expr } => format!("{name} = {expr}"),
             Block::OcrToVar { name, region } => format!("{name} = OCR ({}, {}, {}×{})", region.x, region.y, region.w, region.h),
+            Block::Uia { elem, action, .. } => format!("Elemento {}: {}", crate::uia::describe(elem), action.label()),
             Block::Call { script } => format!("Chamar '{script}'"),
             Block::Log { text } => format!("Log \"{text}\""),
             Block::Breakpoint => "Breakpoint".into(),
@@ -215,7 +244,7 @@ impl Block {
         }
     }
 
-    /// One fresh instance of every block type, for the "+ bloco" menu.
+    /// One fresh instance of every block type, for the block palette.
     pub fn templates() -> Vec<Block> {
         let s = |v: &str| v.to_string();
         vec![
@@ -224,6 +253,7 @@ impl Block {
             Block::Key { vk: 0x0D, action: KeyAction::Press },
             Block::Type { text: String::new() },
             Block::Scroll { x: s("0"), y: s("0"), delta: -120 },
+            Block::Uia { elem: UiaElem::default(), action: UiaAction::Invoke, timeout_ms: crate::uia::default_timeout(), fallback_click: false },
             Block::Wait { ms: s("500"), jitter_ms: 0 },
             Block::WaitUntil { cond: Condition::default(), timeout_ms: s("10000"), on_timeout: OnTimeout::Stop },
             Block::If { cond: Condition::default(), then: vec![], else_: vec![] },
@@ -253,7 +283,12 @@ pub struct Script {
     pub trigger: Trigger,
     /// Debug: log every block as it runs.
     pub trace: bool,
+    /// Mover/Clique/Rolar levam o ponteiro por um trajeto humano em vez de teletransportar.
+    pub human_mouse: bool,
     pub blocks: Vec<Block>,
+    /// Aba Integrações: rodam em paralelo ao fluxo (veja `integrations`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<crate::integrations::Integration>,
 }
 
 impl Default for Script {
@@ -269,7 +304,9 @@ impl Default for Script {
             client_size: None,
             trigger: Trigger::Manual,
             trace: false,
+            human_mouse: false,
             blocks: vec![],
+            integrations: vec![],
         }
     }
 }
@@ -440,7 +477,7 @@ pub fn expr_error(s: &str) -> Option<String> {
     }
 }
 
-fn is_ident(s: &str) -> bool {
+pub fn is_ident(s: &str) -> bool {
     let mut c = s.chars();
     c.next().is_some_and(|f| f.is_alphabetic() || f == '_') && c.all(|ch| ch.is_alphanumeric() || ch == '_')
 }
@@ -461,6 +498,7 @@ pub fn validate(s: &Script, known: &[String]) -> Vec<String> {
         errs.push("trigger: gatilhos precisam de um target".into());
     }
     validate_blocks(&s.blocks, "blocks", known, &mut errs);
+    crate::integrations::validate(&s.integrations, &mut errs);
     errs
 }
 
@@ -478,7 +516,14 @@ fn check_cond(errs: &mut Vec<String>, path: &str, c: &Condition) {
         }
         CondKind::OcrContains { region, .. } if region.w <= 0 || region.h <= 0 => errs.push(format!("{path}.kind.OcrContains.region: w e h devem ser > 0")),
         CondKind::Expr(e) => check_expr(errs, &format!("{path}.kind.Expr"), e),
+        CondKind::Uia { elem, .. } => check_uia_elem(errs, &format!("{path}.kind.Uia.elem"), elem),
         _ => {}
+    }
+}
+
+fn check_uia_elem(errs: &mut Vec<String>, path: &str, e: &UiaElem) {
+    for (field, m) in crate::uia::elem_errors(e) {
+        errs.push(if field.is_empty() { format!("{path}: {m}") } else { format!("{path}.{field}: {m}") });
     }
 }
 
@@ -488,6 +533,13 @@ fn validate_blocks(blocks: &[Block], path: &str, known: &[String], errs: &mut Ve
         let f = |field: &str| format!("{p}.{field}");
         match b {
             Block::Recording { speed, .. } if !(*speed > 0.0) => errs.push(format!("{}: deve ser > 0", f("speed"))),
+            Block::Recording { events, elements, .. } => {
+                for (j, r) in elements.iter().enumerate() {
+                    if !events.get(r.event as usize).is_some_and(|e| matches!(e.ev, Ev::Button(_, true, _, _))) {
+                        errs.push(format!("{}: o evento {} não é um botão pressionado", f(&format!("elements[{j}].event")), r.event));
+                    }
+                }
+            }
             Block::Move { x, y } | Block::Click { x, y, .. } | Block::Scroll { x, y, .. } => {
                 check_expr(errs, &f("x"), x);
                 check_expr(errs, &f("y"), y);
@@ -528,6 +580,19 @@ fn validate_blocks(blocks: &[Block], path: &str, known: &[String], errs: &mut Ve
                 }
                 if region.w <= 0 || region.h <= 0 {
                     errs.push(format!("{}: w e h devem ser > 0", f("region")));
+                }
+            }
+            Block::Uia { elem, action, timeout_ms, .. } => {
+                check_uia_elem(errs, &f("elem"), elem);
+                check_expr(errs, &f("timeout_ms"), timeout_ms);
+                match action {
+                    UiaAction::ReadValue(v) | UiaAction::ReadName(v) if !is_ident(v) => errs.push(format!("{}: \"{v}\" não é um nome de variável válido", f("action"))),
+                    UiaAction::SetValue(t) => {
+                        if let Err(e) = interpolate(t, |e| expr_error(e).map_or(Ok(String::new()), |m| Err(format!("{{{e}}}: {m}")))) {
+                            errs.push(format!("{}: {e}", f("action.SetValue")));
+                        }
+                    }
+                    _ => {}
                 }
             }
             Block::Call { script } if !known.contains(script) => errs.push(format!("{}: script \"{script}\" não encontrado na pasta", f("script"))),
@@ -630,7 +695,7 @@ mod tests {
         let s = Script {
             name: "t".into(),
             blocks: vec![
-                Block::Recording { events: vec![Event { t: 5, ev: Ev::Key(65, 30, false, true) }], speed: 1.0 },
+                Block::Recording { events: vec![Event { t: 5, ev: Ev::Key(65, 30, false, true) }], speed: 1.0, elements: vec![] },
                 Block::If { cond: Condition::default(), then: Block::templates(), else_: vec![Block::Stop] },
             ],
             ..Default::default()
@@ -677,6 +742,50 @@ mod tests {
         let s: Script = serde_json::from_str(r#"{"name":"x","blocks":["Stop",{"Wait":{"ms":"1","jitter_ms":0}}]}"#).unwrap();
         assert_eq!(s.blocks.len(), 2);
         assert_eq!(s.speed, 1.0); // missing fields take defaults
+    }
+
+    /// Ticket 17: a recording saved before `elements` existed parses, validates and its
+    /// block is written back byte for byte.
+    #[test]
+    fn old_recordings_unchanged() {
+        let old = r#"{"name":"velho","target":null,"mode":"Background","simulate_focus":false,"speed":1.0,"repeat":1,"hotkey":null,"client_size":[800,600],"trigger":"Manual","trace":false,"blocks":[{"Recording":{"events":[{"t":0,"ev":{"Move":[10,20]}},{"t":90,"ev":{"Button":["Left",true,10,20]}},{"t":150,"ev":{"Button":["Left",false,10,20]}}],"speed":1.0}}]}"#;
+        let s: Script = serde_json::from_str(old).unwrap();
+        assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.is_empty()));
+        assert_eq!(validate(&s, &[]), Vec::<String>::new());
+        let block = &old[old.find(r#"{"Recording""#).unwrap()..old.len() - 2];
+        assert_eq!(serde_json::to_string(&s.blocks[0]).unwrap(), block);
+        let new = old.replace(r#""speed":1.0}}]"#, r#""speed":1.0,"elements":[{"event":1,"elem":{"name":"OK","control_type":"Button","x":10,"y":20},"action":"Invoke"}]}}]"#);
+        let s: Script = serde_json::from_str(&new).unwrap();
+        assert!(matches!(&s.blocks[0], Block::Recording { elements, .. } if elements.len() == 1));
+        assert_eq!(validate(&s, &[]), Vec::<String>::new());
+        let s: Script = serde_json::from_str(&new.replace(r#""event":1"#, r#""event":0"#)).unwrap();
+        assert_eq!(validate(&s, &[]), ["blocks[0].elements[0].event: o evento 0 não é um botão pressionado"]);
+    }
+
+    #[test]
+    fn uia_validation() {
+        use crate::uia::UiaElem;
+        let s = |v: &str| v.to_string();
+        let ok_elem = UiaElem { automation_id: s("btnOk"), control_type: s("Button"), ..Default::default() };
+        // Only elem and action are needed; timeout and fallback take defaults.
+        let json = r#"{"name":"u","blocks":[{"Uia":{"elem":{"automation_id":"btnOk","control_type":"Button"},"action":"Invoke"}},
+            {"If":{"cond":{"kind":{"Uia":{"elem":{"name":"OK"}}},"negate":false},"then":[],"else_":[]}}]}"#;
+        let parsed: Script = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.blocks[0], Block::Uia { elem: ok_elem, action: UiaAction::Invoke, timeout_ms: s("5000"), fallback_click: false });
+        assert!(matches!(&parsed.blocks[1], Block::If { cond: Condition { kind: CondKind::Uia { test: UiaTest::Exists, .. }, .. }, .. }));
+        assert_eq!(validate(&parsed, &[]), Vec::<String>::new());
+        let bad = Script {
+            name: s("bad"),
+            blocks: vec![
+                Block::Uia { elem: UiaElem::default(), action: UiaAction::ReadValue(s("1x")), timeout_ms: s("x >"), fallback_click: true },
+                Block::Uia { elem: UiaElem { control_type: s("Botao"), ..Default::default() }, action: UiaAction::SetValue(s("{a +}")), timeout_ms: s("100"), fallback_click: false },
+                Block::WaitUntil { cond: Condition { kind: CondKind::Uia { elem: UiaElem::default(), test: UiaTest::Checked }, negate: false }, timeout_ms: s("1"), on_timeout: OnTimeout::Stop },
+            ],
+            ..Default::default()
+        };
+        let errs = validate(&bad, &[]);
+        let paths: Vec<&str> = errs.iter().map(|e| e.split(':').next().unwrap()).collect();
+        assert_eq!(paths, ["blocks[0].elem", "blocks[0].timeout_ms", "blocks[0].action", "blocks[1].elem.control_type", "blocks[1].action.SetValue", "blocks[2].cond.kind.Uia.elem"], "{errs:#?}");
     }
 
     #[test]

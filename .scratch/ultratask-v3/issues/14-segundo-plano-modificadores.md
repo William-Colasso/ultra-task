@@ -58,6 +58,9 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu` + Wine; veja `../AMBIENT
 - O aviso sai do `Injector` por `notes`, e não muda o trait `Io`, para não mexer no interpretador.
 - Limitação conhecida, no README: `GetAsyncKeyState` e RawInput continuam vendo o hardware.
 
+### Merge com `main-vqbyri`
+Só conflitos de texto, sem mudança de comportamento: `mod bgkeys;` e `bgkeys.rs` na lista de glifos (agora um arquivo por linha) entraram em ordem alfabética; no `WinIo`, os campos `say`/`last_note` convivem com o `uia` novo. No README, a linha do `--include-ignored` junta os testes dos dois lados. Depois do merge, `cargo test --target x86_64-pc-windows-gnu` passou com 107 testes e 7 ignorados, sem warnings, e o JSON do roteiro continua passando no `--validate`.
+
 ### Pendente no Windows
 Preparação: num worktree com este branch, `cargo build` e `cargo test` (toolchain `stable-x86_64-pc-windows-msvc`).
 1. **Testes ignorados:** `cargo test bgkeys -- --ignored` e depois `cargo test -- --include-ignored`. Devem passar `e2e_ctrl_s_forged`, `e2e_hung_target_does_not_freeze` e o `win::tests::e2e_background_edit` existente (critério "teclas sem modificador seguem o caminho de hoje").

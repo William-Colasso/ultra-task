@@ -56,6 +56,9 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu` + Wine; veja `../AMBIENT
 - Borda amarela: `SetIsBorderRequired(false)` e `SetIsCursorCaptureEnabled(false)`, com erros ignorados. No Windows 10 antes do 2104, a borda continua.
 - Dispositivo D3D11: hardware, com WARP de reserva, e `D3D11_CREATE_DEVICE_BGRA_SUPPORT`.
 
+### Merge com `main-vqbyri`
+Só conflitos de texto, sem mudança de comportamento: features do WGC intercaladas em ordem alfabética com `Win32_Networking_WinHttp`, `Win32_System_Com` e `Win32_UI_Accessibility`; `mod wgc;` e `wgc.rs` na lista de glifos em ordem alfabética; o campo `cap` do `WinIo` convive com o `uia` novo. No README, a linha do `--include-ignored` junta os testes dos dois lados. Depois do merge, `cargo test --target x86_64-pc-windows-gnu` passou com 107 testes e 7 ignorados, sem warnings, e o JSON do roteiro continua passando no `--validate`.
+
 ### Pendente no Windows
 Preparação: num worktree com este branch, `cargo build` e `cargo test` (toolchain `stable-x86_64-pc-windows-msvc`), num Windows 10 1903+ ou 11.
 1. **Teste ignorado:** `cargo test wgc -- --ignored` (e depois `cargo test -- --include-ignored` inteiro). `e2e_wgc_covered_matches_visible` tem que passar. No Windows 10, anote se a borda amarela aparece.
