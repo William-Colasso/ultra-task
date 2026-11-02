@@ -195,6 +195,9 @@ fn url_and_request() {
 fn editor_renders_every_variant() {
     let mut s: Script = serde_json::from_str(TICKET_JSON).unwrap();
     s.integrations.push(Integration::default());
+    for (_, mk) in editor::DESTS {
+        s.integrations.push(Integration { dest: mk(), ..Default::default() });
+    }
     let before = s.integrations.clone();
     let ctx = eframe::egui::Context::default();
     for _ in 0..2 {

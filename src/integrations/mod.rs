@@ -9,6 +9,8 @@
 //! que implementa `Destination` para ela, um braço em `Dest::get` e um em `editor::dest_ui`.
 //! O resto (gatilhos, formatos, variáveis de resultado, validação comum) não muda.
 
+pub mod clipboard;
+pub mod command;
 pub mod editor;
 pub mod engine;
 pub mod file;
@@ -18,6 +20,8 @@ use crate::model::{expr_error, interpolate, is_ident};
 use evalexpr::{Context, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
 
+pub use clipboard::{ClipMode, ClipboardDest};
+pub use command::CommandDest;
 pub use file::{FileDest, FileMode};
 pub use http::{HttpDest, Method};
 
@@ -54,6 +58,8 @@ pub enum When {
 pub enum Dest {
     Http(HttpDest),
     File(FileDest),
+    Command(CommandDest),
+    Clipboard(ClipboardDest),
 }
 
 impl Dest {
@@ -61,6 +67,8 @@ impl Dest {
         match self {
             Dest::Http(h) => h,
             Dest::File(f) => f,
+            Dest::Command(c) => c,
+            Dest::Clipboard(c) => c,
         }
     }
 }

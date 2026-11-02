@@ -5,9 +5,11 @@ use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui};
 const RED: Color32 = Color32::from_rgb(230, 60, 60);
 
 /// Destinos oferecidos no editor: rótulo + valor novo. Um destino novo entra aqui e em `dest_ui`.
-const DESTS: &[(&str, fn() -> Dest)] = &[
+pub(super) const DESTS: &[(&str, fn() -> Dest)] = &[
     ("REST (HTTP/HTTPS)", || Dest::Http(HttpDest::default())),
     ("Arquivo", || Dest::File(FileDest::default())),
+    ("Comando", || Dest::Command(CommandDest::default())),
+    ("Área de transferência", || Dest::Clipboard(ClipboardDest::default())),
 ];
 
 pub fn integrations_ui(ui: &mut Ui, list: &mut Vec<Integration>) {
@@ -131,7 +133,51 @@ fn dest_ui(ui: &mut Ui, d: &mut Dest, id: Id) {
     match d {
         Dest::Http(h) => http_ui(ui, h, id),
         Dest::File(f) => file_ui(ui, f, id),
+        Dest::Command(c) => command_ui(ui, c),
+        Dest::Clipboard(c) => clipboard_ui(ui, c, id),
     }
+}
+
+fn command_ui(ui: &mut Ui, c: &mut CommandDest) {
+    ui.horizontal(|ui| {
+        ui.label("programa");
+        interp_edit(ui, &mut c.program, 300.0, false);
+    });
+    let mut remove = None;
+    for (k, a) in c.args.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(format!("arg {}", k + 1));
+            interp_edit(ui, a, 300.0, false);
+            if ui.small_button("✖").on_hover_text("Remover argumento").clicked() {
+                remove = Some(k);
+            }
+        });
+    }
+    if let Some(k) = remove {
+        c.args.remove(k);
+    }
+    ui.horizontal(|ui| {
+        if ui.small_button("➕ argumento").clicked() {
+            c.args.push(String::new());
+        }
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut c.timeout_ms).range(1..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("roda sem janela; o envio vai pelo stdin, o stdout vai para o resultado e o código de saída para r_status");
+}
+
+fn clipboard_ui(ui: &mut Ui, c: &mut ClipboardDest, id: Id) {
+    ui.horizontal(|ui| {
+        ComboBox::from_id_salt(id.with("mode")).width(110.0).selected_text(c.mode.label()).show_ui(ui, |ui| {
+            for m in ClipMode::ALL {
+                ui.selectable_value(&mut c.mode, m, m.label());
+            }
+        });
+        ui.weak(match c.mode {
+            ClipMode::Write => "põe o envio na área de transferência",
+            ClipMode::Read => "lê o texto atual para a variável de resultado (o envio é ignorado)",
+        });
+    });
 }
 
 fn file_ui(ui: &mut Ui, f: &mut FileDest, id: Id) {

@@ -61,6 +61,8 @@ A aba **Integrações** de cada script liga o fluxo a serviços externos sem tra
 - **destino**:
   - REST (HTTP/HTTPS), com método, URL com `{…}`, cabeçalhos e timeout;
   - Arquivo: acrescenta, sobrescreve ou lê um arquivo de texto (a leitura vai para a variável de resultado). O caminho aceita `{…}`, um caminho relativo parte da pasta do exe, e as pastas que faltam são criadas. JSON grava uma linha por envio, CSV grava o cabeçalho quando o arquivo é novo, e texto vai como está;
+  - Comando: roda um programa sem janela de console, com argumentos que aceitam `{…}`. O envio vai pelo stdin, o stdout vai para a variável de resultado e o código de saída para `r_status`; se o timeout estoura, o processo é encerrado;
+  - Área de transferência: escreve o envio ou lê o texto atual para a variável de resultado;
 - **envio**: JSON das variáveis escolhidas, uma linha CSV ou um texto com `{…}`;
 - **resultado** (opcional): a variável `r` recebe o corpo da resposta; `r_ok`, `r_status` e `r_pendente` dizem como foi.
 
@@ -88,5 +90,5 @@ O validador imprime `OK` ou `ERRO <caminho JSON>: <motivo>` e sai com código 1 
 ## Testes
 ```bash
 cargo test                      # interpretador, debug, validação, explode, glob, interpolação, JSON, lParam, integrações (servidor HTTP local)
-cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU e HTTPS real (viacep.com.br)
+cargo test -- --include-ignored # + E2E real (janela EDIT em segundo plano + OCR), registro numa chave temporária do HKCU, HTTPS real (viacep.com.br), área de transferência e arquivo somente leitura
 ```

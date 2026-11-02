@@ -1274,6 +1274,8 @@ mod tests {
             include_str!("cola.rs"),
             include_str!("editor.rs"),
             include_str!("humanmouse.rs"),
+            include_str!("integrations/clipboard.rs"),
+            include_str!("integrations/command.rs"),
             include_str!("integrations/editor.rs"),
             include_str!("integrations/engine.rs"),
             include_str!("integrations/file.rs"),

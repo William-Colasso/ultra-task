@@ -258,6 +258,44 @@ Todos seguem as mesmas regras de gatilho, envio e variáveis de resultado. Em er
 }
 ```
 
+**Comando** (`Command`): `{"Command": {"program": "cmd", "args": ["/c", "echo {n}"], "timeout_ms": 10000}}`.
+- Roda o programa sem janela de console, na pasta do `ultratask.exe`. `program` (caminho ou nome no PATH) e cada item de `args` aceitam `{expr}`. Para um comando do `cmd`, ponha a linha inteira num só argumento depois de `"/c"`. Evite aspas dentro dos argumentos do `cmd`: o escape do Windows e o do `cmd` são diferentes.
+- O envio (`payload`) vai pelo **stdin**. O **stdout**, sem espaços nas pontas, vai para `r`; o **código de saída** vai para `r_status`; `r_ok` é `true` só com código 0 (outro código vai para o log, com o stderr).
+- Se passar de `timeout_ms`, o processo (e o que ele abriu) é encerrado e o log diz `tempo esgotado`.
+- Cuidado: um valor de variável dentro de `args` vira parte da linha de comando. Para dados vindos de fora, prefira mandar pelo stdin.
+
+**Área de transferência** (`Clipboard`): `{"Clipboard": {"mode": "Write"}}`.
+- `"Write"` põe o envio na área de transferência (como texto). `"Read"` lê o texto atual para `r` (o `payload` é ignorado; vazio quando não há texto).
+- `r_status`: número de caracteres escritos ou lidos.
+
+```json
+{
+  "name": "Procura e copia",
+  "integrations": [{
+    "name": "findstr",
+    "when": { "OnSet": ["texto"] },
+    "dest": { "Command": { "program": "cmd", "args": ["/c", "findstr /n {chave}"], "timeout_ms": 5000 } },
+    "payload": { "Text": "{texto}" },
+    "result": "achou"
+  }, {
+    "name": "Copia",
+    "when": { "OnSet": ["achou_txt"] },
+    "dest": { "Clipboard": { "mode": "Write" } },
+    "payload": { "Text": "{achou_txt}" },
+    "result": null
+  }],
+  "blocks": [
+    { "SetVar": { "name": "chave", "expr": "\"pedido\"" } },
+    { "SetVar": { "name": "texto", "expr": "\"pedido 42\"" } },
+    { "WaitUntil": { "cond": { "kind": { "Expr": "!achou_pendente" }, "negate": false }, "timeout_ms": "6000", "on_timeout": "Stop" } },
+    { "If": {
+        "cond": { "kind": { "Expr": "achou_ok" }, "negate": false },
+        "then": [ { "SetVar": { "name": "achou_txt", "expr": "achou" } } ],
+        "else_": [ { "Log": { "text": "não achou (código {achou_status})" } } ] } }
+  ]
+}
+```
+
 ### Teclas (`vk`, decimal)
 
 | Teclas | Códigos |
