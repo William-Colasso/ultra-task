@@ -8,8 +8,8 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 
 | Ticket | Status | Commits | Pendente no Windows |
 |---|---|---|---|
-| [01-editor-arrastar-blocos](issues/01-editor-arrastar-blocos.md) | ready-for-agent | | |
-| [02-editor-paleta-envolver](issues/02-editor-paleta-envolver.md) | ready-for-agent | | |
+| [01-editor-arrastar-blocos](issues/01-editor-arrastar-blocos.md) | needs-local-verification | eb5d77c, 284f8ee | 📍 em bloco aninhado; cores nos temas claro/escuro |
+| [02-editor-paleta-envolver](issues/02-editor-paleta-envolver.md) | needs-local-verification | 3e38132, 92ebe03 | Build release MSVC e aparência |
 | [03-cola-de-comandos-e-manual](issues/03-cola-de-comandos-e-manual.md) | needs-local-verification | aedb358, f53e8a4 | Botão 📖 Manual da barra, escolha de sugestão com o mouse, aparência |
 | [04-movimento-humano-do-mouse](issues/04-movimento-humano-do-mouse.md) | needs-local-verification | b0e6a8b, 575d1c9 | Arrasto no Paint (Foco) deixa traço curvo |
 | [05-exportar-exe](issues/05-exportar-exe.md) | ready-for-agent | | |
