@@ -12,8 +12,8 @@ Status possíveis: `ready-for-agent`, `in-progress`, `needs-local-verification`
 | [02-editor-paleta-envolver](issues/02-editor-paleta-envolver.md) | needs-local-verification | 3e38132, 92ebe03 | Build release MSVC e aparência |
 | [03-cola-de-comandos-e-manual](issues/03-cola-de-comandos-e-manual.md) | needs-local-verification | aedb358, f53e8a4 | Botão 📖 Manual da barra, escolha de sugestão com o mouse, aparência |
 | [04-movimento-humano-do-mouse](issues/04-movimento-humano-do-mouse.md) | needs-local-verification | b0e6a8b, 575d1c9 | Arrasto no Paint (Foco) deixa traço curvo |
-| [05-exportar-exe](issues/05-exportar-exe.md) | ready-for-agent | | |
-| [06-roda-em-qualquer-windows](issues/06-roda-em-qualquer-windows.md) | ready-for-agent | | |
+| [05-exportar-exe](issues/05-exportar-exe.md) | needs-local-verification | bd4f49d, 1b64d1b, a91c303 | Duplo clique; dois .exe em paralelo com o app aberto; Parar na bandeja e atalho de pânico |
+| [06-roda-em-qualquer-windows](issues/06-roda-em-qualquer-windows.md) | needs-local-verification | ae46e5b, 9083a17, a91c303 | `dumpbin /dependents` do exe MSVC; VM/Sandbox sem GPU; Windows sem OCR; pasta sem escrita em Program Files |
 | [07-builds-32-bits-e-arm64](issues/07-builds-32-bits-e-arm64.md) | ready-for-agent | | |
 | [08-windows-7-e-8](issues/08-windows-7-e-8.md) | ready-for-agent | | |
 | [09-integracoes-rest](issues/09-integracoes-rest.md) | needs-local-verification | 905c4d8, 9fca086 | Aba Integrações (criar/editar/remover) e painel Execuções na tela; HTTPS real (`https_real_viacep`) |
