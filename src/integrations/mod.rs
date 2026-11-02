@@ -9,15 +9,26 @@
 //! que implementa `Destination` para ela, um braço em `Dest::get` e um em `editor::dest_ui`.
 //! O resto (gatilhos, formatos, variáveis de resultado, validação comum) não muda.
 
+pub mod clipboard;
+pub mod command;
 pub mod editor;
 pub mod engine;
+pub mod file;
 pub mod http;
+pub mod odbc;
+pub mod sql;
+pub mod sqlite;
 
 use crate::model::{expr_error, interpolate, is_ident};
 use evalexpr::{Context, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
 
+pub use clipboard::{ClipMode, ClipboardDest};
+pub use command::CommandDest;
+pub use file::{FileDest, FileMode};
 pub use http::{HttpDest, Method};
+pub use odbc::OdbcDest;
+pub use sqlite::SqliteDest;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -51,12 +62,22 @@ pub enum When {
 #[serde(deny_unknown_fields)]
 pub enum Dest {
     Http(HttpDest),
+    File(FileDest),
+    Command(CommandDest),
+    Clipboard(ClipboardDest),
+    Sqlite(SqliteDest),
+    Odbc(OdbcDest),
 }
 
 impl Dest {
     pub fn get(&self) -> &dyn Destination {
         match self {
             Dest::Http(h) => h,
+            Dest::File(f) => f,
+            Dest::Command(c) => c,
+            Dest::Clipboard(c) => c,
+            Dest::Sqlite(q) => q,
+            Dest::Odbc(o) => o,
         }
     }
 }
@@ -77,6 +98,8 @@ pub enum Payload {
 pub struct Body {
     pub content_type: &'static str,
     pub text: String,
+    /// Linha de cabeçalho do CSV (os nomes das variáveis); `None` nos outros formatos.
+    pub header: Option<String>,
 }
 
 /// Como terminou uma entrega. Vira `r`, `r_ok` e `r_status`.
@@ -105,9 +128,10 @@ pub trait Destination {
     fn kind(&self) -> &'static str;
     /// Problemas de configuração, cada um prefixado por `path` (ex.: `integrations[0].dest.Http`).
     fn validate(&self, path: &str, errs: &mut Vec<String>);
-    /// Roda na thread do fluxo, no instante do disparo: resolve os `{…}` com `eval` e devolve o
-    /// trabalho que vai rodar em segundo plano.
-    fn prepare(&self, body: Body, eval: &mut dyn FnMut(&str) -> Result<String, String>) -> Result<Job, String>;
+    /// Roda na thread do fluxo, no instante do disparo: resolve os `{…}` com `eval_text(vars, …)`
+    /// (ou lê os valores tipados, como os parâmetros SQL) e devolve o trabalho que vai rodar em
+    /// segundo plano.
+    fn prepare(&self, body: Body, vars: &HashMapContext) -> Result<Job, String>;
     /// Limite de uma entrega; também limita a espera do gatilho "ao terminar".
     fn timeout_ms(&self) -> u64;
 }
@@ -162,13 +186,14 @@ impl Payload {
                 for n in names {
                     fields.push(format!("{}:{}", serde_json::Value::String(n.clone()), to_json(var(vars, n)?)));
                 }
-                Body { content_type: "application/json; charset=utf-8", text: format!("{{{}}}", fields.join(",")) }
+                Body { content_type: "application/json; charset=utf-8", text: format!("{{{}}}", fields.join(",")), header: None }
             }
             Payload::Csv(names) => {
                 let fields: Result<Vec<String>, String> = names.iter().map(|n| var(vars, n).map(csv_field)).collect();
-                Body { content_type: "text/csv; charset=utf-8", text: fields?.join(",") }
+                let header = names.iter().map(|n| csv_field(&Value::String(n.clone()))).collect::<Vec<_>>().join(",");
+                Body { content_type: "text/csv; charset=utf-8", text: fields?.join(","), header: Some(header) }
             }
-            Payload::Text(t) => Body { content_type: "text/plain; charset=utf-8", text: interpolate(t, |e| eval_text(vars, e))? },
+            Payload::Text(t) => Body { content_type: "text/plain; charset=utf-8", text: interpolate(t, |e| eval_text(vars, e))?, header: None },
         })
     }
 }

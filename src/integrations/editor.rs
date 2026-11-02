@@ -5,7 +5,14 @@ use eframe::egui::{self, Color32, ComboBox, DragValue, Id, Ui};
 const RED: Color32 = Color32::from_rgb(230, 60, 60);
 
 /// Destinos oferecidos no editor: rótulo + valor novo. Um destino novo entra aqui e em `dest_ui`.
-const DESTS: &[(&str, fn() -> Dest)] = &[("REST (HTTP/HTTPS)", || Dest::Http(HttpDest::default()))];
+pub(super) const DESTS: &[(&str, fn() -> Dest)] = &[
+    ("REST (HTTP/HTTPS)", || Dest::Http(HttpDest::default())),
+    ("Arquivo", || Dest::File(FileDest::default())),
+    ("Comando", || Dest::Command(CommandDest::default())),
+    ("Área de transferência", || Dest::Clipboard(ClipboardDest::default())),
+    ("SQLite", || Dest::Sqlite(SqliteDest::default())),
+    ("ODBC (bancos instalados)", || Dest::Odbc(OdbcDest::default())),
+];
 
 pub fn integrations_ui(ui: &mut Ui, list: &mut Vec<Integration>) {
     ui.weak("As integrações rodam em paralelo e nunca travam os blocos. O fluxo reage pelas variáveis de resultado (ex.: Esperar até !r_pendente).");
@@ -127,7 +134,109 @@ fn dest_ui(ui: &mut Ui, d: &mut Dest, id: Id) {
     });
     match d {
         Dest::Http(h) => http_ui(ui, h, id),
+        Dest::File(f) => file_ui(ui, f, id),
+        Dest::Command(c) => command_ui(ui, c),
+        Dest::Clipboard(c) => clipboard_ui(ui, c, id),
+        Dest::Sqlite(q) => sqlite_ui(ui, q),
+        Dest::Odbc(o) => odbc_ui(ui, o),
     }
+}
+
+/// Campo do SQL: vermelho se usar `?`; a dica lista os parâmetros `:variavel`.
+fn sql_edit(ui: &mut Ui, sql: &mut String) {
+    let mut errs = vec![];
+    sql::validate_sql("", sql, &mut errs);
+    let names = sql::param_names(sql);
+    let tip = if names.is_empty() { "valores entram como :variavel (ligados pelo nome, sem interpolação)".to_string() } else { format!("parâmetros: {}", names.iter().map(|n| format!(":{n}")).collect::<Vec<_>>().join(", ")) };
+    let mut te = egui::TextEdit::multiline(sql).desired_rows(3).desired_width(420.0).code_editor().hint_text("SELECT nome FROM clientes WHERE id = :id");
+    if !errs.is_empty() {
+        te = te.text_color(RED);
+    }
+    ui.add(te).on_hover_text(tip);
+}
+
+fn odbc_ui(ui: &mut Ui, o: &mut OdbcDest) {
+    ui.horizontal(|ui| {
+        ui.label("conexão");
+        ui.add(egui::TextEdit::singleline(&mut o.connection).desired_width(360.0).hint_text("MeuBanco ou Driver={SQL Server};Server=.;Database=loja;Trusted_Connection=yes"));
+    });
+    ui.weak("um DSN (ex.: MeuBanco) ou uma string de conexão; uma senha aqui fica em texto puro no JSON do script");
+    sql_edit(ui, &mut o.sql);
+    ui.horizontal(|ui| {
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut o.timeout_ms).range(1000..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("mesmo contrato do SQLite: SELECT põe as linhas em JSON no resultado; os outros comandos põem as linhas afetadas em r_status");
+}
+
+fn sqlite_ui(ui: &mut Ui, q: &mut SqliteDest) {
+    ui.horizontal(|ui| {
+        ui.label("arquivo .db");
+        interp_edit(ui, &mut q.path, 300.0, false);
+    });
+    sql_edit(ui, &mut q.sql);
+    ui.horizontal(|ui| {
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut q.timeout_ms).range(1..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("SELECT põe as linhas em JSON no resultado (ex.: json(r, \"/0/nome\")); os outros comandos põem as linhas afetadas em r_status");
+}
+
+fn command_ui(ui: &mut Ui, c: &mut CommandDest) {
+    ui.horizontal(|ui| {
+        ui.label("programa");
+        interp_edit(ui, &mut c.program, 300.0, false);
+    });
+    let mut remove = None;
+    for (k, a) in c.args.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(format!("arg {}", k + 1));
+            interp_edit(ui, a, 300.0, false);
+            if ui.small_button("✖").on_hover_text("Remover argumento").clicked() {
+                remove = Some(k);
+            }
+        });
+    }
+    if let Some(k) = remove {
+        c.args.remove(k);
+    }
+    ui.horizontal(|ui| {
+        if ui.small_button("➕ argumento").clicked() {
+            c.args.push(String::new());
+        }
+        ui.label("timeout");
+        ui.add(DragValue::new(&mut c.timeout_ms).range(1..=600_000).speed(100.0).suffix(" ms"));
+    });
+    ui.weak("roda sem janela; o envio vai pelo stdin, o stdout vai para o resultado e o código de saída para r_status");
+}
+
+fn clipboard_ui(ui: &mut Ui, c: &mut ClipboardDest, id: Id) {
+    ui.horizontal(|ui| {
+        ComboBox::from_id_salt(id.with("mode")).width(110.0).selected_text(c.mode.label()).show_ui(ui, |ui| {
+            for m in ClipMode::ALL {
+                ui.selectable_value(&mut c.mode, m, m.label());
+            }
+        });
+        ui.weak(match c.mode {
+            ClipMode::Write => "põe o envio na área de transferência",
+            ClipMode::Read => "lê o texto atual para a variável de resultado (o envio é ignorado)",
+        });
+    });
+}
+
+fn file_ui(ui: &mut Ui, f: &mut FileDest, id: Id) {
+    ui.horizontal(|ui| {
+        ComboBox::from_id_salt(id.with("mode")).width(110.0).selected_text(f.mode.label()).show_ui(ui, |ui| {
+            for m in FileMode::ALL {
+                ui.selectable_value(&mut f.mode, m, m.label());
+            }
+        });
+        interp_edit(ui, &mut f.path, 340.0, false);
+    });
+    ui.weak(match f.mode {
+        FileMode::Read => "lê o arquivo inteiro para a variável de resultado (o envio é ignorado)",
+        _ => "caminho relativo parte da pasta de dados (a do exe ou, sem escrita nela, %LOCALAPPDATA%\\UltraTask); JSON grava uma linha por envio, CSV ganha cabeçalho no arquivo novo",
+    });
 }
 
 fn http_ui(ui: &mut Ui, h: &mut HttpDest, id: Id) {
