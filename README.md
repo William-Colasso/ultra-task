@@ -3,6 +3,15 @@
 UltraTask é um gravador e reprodutor de macros para Windows, inspirado no TinyTask e escrito todo em Rust.
 A diferença principal é que cada script roda **numa janela-alvo** e, no modo Segundo plano, não toma o seu mouse nem o teclado.
 
+## Releases
+Os releases mais recentes, do mais novo para o mais antigo (lista completa em [Releases](https://github.com/William-Colasso/ultra-task/releases)):
+
+| Release | Data | Tag | Download |
+|---|---|---|---|
+| [UltraTask v1.0.0](https://github.com/William-Colasso/ultra-task/releases/tag/latest) (mais recente) | 02/11/2026 | `latest` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/latest/ultratask.exe) (x64, 8,2 MB) |
+
+A v1.0.0 é anterior à rodada 3: editor com arrastar e soltar, integrações, exportar .exe, UI Automation, modo CDP e builds extras ainda não estão em nenhum release. Até sair um release novo, compile a partir do código (ver [Build](#build)).
+
 ## Requisitos
 - Windows 10 ou 11: x64, x86 (32 bits, roda também num Windows de 64 bits) ou ARM64, cada um com o seu exe (ver [Build](#build)). Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
   - Não depende do runtime do Visual C++ (o CRT vai embutido no exe) e só usa DLLs que vêm com o Windows.
