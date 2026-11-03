@@ -10,7 +10,7 @@
 
 **Bloqueado por:** 01 (Editor: arrastar blocos para dentro e para fora de containers).
 
-**Status:** needs-local-verification
+**Status:** done
 
 Leia antes: `../CONVENCOES.md`.
 
@@ -63,3 +63,8 @@ Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-window
 - `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
 
 O build de release com MSVC passou. Falta conferir a aparência na tela.
+
+### Verificação visual no Windows (2026-11-03)
+Feita no exe de release MSVC aberto pelo usuário. A janela foi capturada com PrintWindow e os controles foram acionados pela UI Automation (AccessKit), sem mexer no mouse nem alterar o script aberto.
+
+A paleta por categoria aparece nos dois temas. Recolher o Se mostra "(2 blocos dentro)" e expandir restaura, sem marcar o script como alterado.

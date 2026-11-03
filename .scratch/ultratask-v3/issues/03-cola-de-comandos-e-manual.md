@@ -22,7 +22,7 @@ Leia antes: `../CONVENCOES.md`.
 - [x] Digitar `ra` num campo de expressão sugere `rand(a, b)` com a descrição, e escolher a sugestão insere `rand(` no cursor.
 - [x] A cola lista as variáveis definidas em qualquer nível do script: Definir variável, Ler texto e, se o ticket 09 já estiver na `main`, as variáveis de resultado das integrações.
 - [x] Dentro de `{…}`, em Digitar e Mostrar no log, a cola funciona igual. Fora das chaves, ela não aparece.
-- [ ] O Manual abre pela barra e pelo "?". O "?" leva direto à seção Expressões.
+- [x] O Manual abre pela barra e pelo "?". O "?" leva direto à seção Expressões.
 - [x] Um teste roda o exemplo de cada função do catálogo num interpretador novo e falha se algum der erro.
 - [x] Um teste falha se uma função registrada pelo UltraTask faltar no catálogo.
 - [x] Um teste falha se a skill de scripts não citar alguma função do catálogo.
@@ -97,3 +97,8 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu`, testes no Wine), confor
    2. Digite `x >` num campo x: a cola mostra `⚠` e o erro em vermelho.
    3. Em "Digitar", digite `oi {con`: a lista mostra as variáveis e `contem(texto, trecho)`. Mova o cursor para antes do `{`: a lista some.
    4. Defina duas variáveis dentro de um "Repetir" e confira que ambas aparecem na cola de um campo de outro bloco.
+
+### Verificação visual no Windows (2026-11-03)
+Feita no exe de release MSVC aberto pelo usuário. A janela foi capturada com PrintWindow e os controles foram acionados pela UI Automation (AccessKit), sem mexer no mouse nem alterar o script aberto.
+
+O botão 📖 Manual da barra abre a janela com as seções Expressões, Blocos, Condições, Modos, Teclas e Atalhos. O "?" de um campo abre o Manual já em Expressões. Falta escolher uma sugestão da cola com o mouse.

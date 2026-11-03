@@ -22,7 +22,7 @@ Leia antes: `../CONVENCOES.md`.
 - [x] Soltar um container nele mesmo ou num descendente é recusado: o indicador mostra que não pode, e a árvore não muda.
 - [x] Mover marca o script como alterado (💾 Salvar), e o JSON salvo guarda o novo aninhamento.
 - [ ] 📍, Explodir, duplicar e excluir continuam funcionando em blocos aninhados.
-- [ ] As cores funcionam nos temas claro e escuro.
+- [x] As cores funcionam nos temas claro e escuro.
 - [x] A operação de mover na árvore é uma função pura, fora da UI, com testes unitários para estes casos:
   - mesma lista, para frente e para trás;
   - para dentro de uma vaga filha;
@@ -66,3 +66,8 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu`, testes no Wine; veja `.
 - **Cores nos temas claro e escuro.** Alternar o tema com o botão ☀/🌙 da barra de cima com um script que tenha um bloco de cada categoria (Clique, Esperar, Se, Definir variável, Mostrar no log): as cinco cores (azul, âmbar, roxo, verde, rosa) se distinguem, o texto dos cartões é legível nos dois temas, e a alça ☰ aparece na cor da categoria.
 - **Teste manual do arrastar** (o automático usa eventos sintéticos): arrastar pela ☰ um bloco entre outros, para dentro de um Repetir vazio e de volta; arrastar um Se para o próprio "senão" mostra a linha vermelha e não muda nada; depois de mover, 💾 Salvar fica ativo e o JSON do script, na pasta indicada em ⚙ ("Scripts ficam em …"), mostra o novo aninhamento.
 - `cargo build --release` no toolchain MSVC.
+
+### Verificação visual no Windows (2026-11-03)
+Feita no exe de release MSVC aberto pelo usuário. A janela foi capturada com PrintWindow e os controles foram acionados pela UI Automation (AccessKit), sem mexer no mouse nem alterar o script aberto.
+
+Cartões com cor por categoria, alça e vagas "então/senão" aninhadas aparecem certos nos dois temas. Falta testar 📍, Explodir, duplicar e excluir num bloco aninhado.

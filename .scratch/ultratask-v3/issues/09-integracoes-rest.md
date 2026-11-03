@@ -113,3 +113,8 @@ Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-window
 - `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
 
 `https_real_viacep` passou: HTTPS real pelo WinHTTP, com o repositório de certificados do Windows. Falta conferir a aba Integrações e o painel Execuções na tela.
+
+### Verificação visual no Windows (2026-11-03)
+Feita no exe de release MSVC aberto pelo usuário. A janela foi capturada com PrintWindow e os controles foram acionados pela UI Automation (AccessKit), sem mexer no mouse nem alterar o script aberto.
+
+A aba Integrações mostra nome, gatilho, destino REST (método, URL, timeout, cabeçalhos), envio e resultado, e aponta o erro de validação na hora. Falta criar, editar, remover e salvar uma integração, e ver o resultado no painel Execuções.
