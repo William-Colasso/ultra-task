@@ -2,8 +2,10 @@
 //! low-level mouse/keyboard hooks (only while recording, picking or a Focus run is active,
 //! because an LL mouse hook adds latency to every mouse event system-wide).
 use crate::model::{Btn, Ev, Event, Hotkey};
+use crate::uia_rec::{self, Click, ClickCollector, RecElem};
 use crate::win::{self, Hwnd};
 use std::cell::RefCell;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
@@ -27,7 +29,7 @@ pub enum Cmd {
 
 pub enum Out {
     Hotkey(i32),
-    Recorded(Vec<Event>),
+    Recorded(Vec<Event>, Vec<RecElem>),
     Picked { x: i32, y: i32, root: Hwnd },
     Error(String),
 }
@@ -37,6 +39,8 @@ static FOCUS_RUNS: AtomicU32 = AtomicU32::new(0);
 /// GetTickCount64() of the last physical (non-injected) mouse event or key-down.
 pub static LAST_PHYSICAL: AtomicU64 = AtomicU64::new(0);
 static HOOK_TID: AtomicU32 = AtomicU32::new(0);
+/// Recordings whose clicks' UIA elements were resolved off this thread, waiting to be emitted.
+static FINISHED: Mutex<Vec<(Vec<Event>, Vec<RecElem>)>> = Mutex::new(Vec::new());
 
 pub fn tick() -> u64 {
     unsafe { GetTickCount64() }
@@ -62,6 +66,9 @@ struct Recorder {
     target: Hwnd,
     events: Vec<Event>,
     last_move: (i32, i32),
+    /// Resolves the UIA element of each button-down on its own thread.
+    clicks: ClickCollector,
+    downs: u32,
 }
 
 #[derive(Default)]
@@ -124,6 +131,10 @@ impl Hooks {
                             while let Ok(c) = rx.try_recv() {
                                 handle(c);
                             }
+                            let done = std::mem::take(&mut *FINISHED.lock().unwrap_or_else(|e| e.into_inner()));
+                            for (ev, els) in done {
+                                emit(Out::Recorded(ev, els));
+                            }
                             ensure_hooks();
                         }
                         _ => {}
@@ -162,10 +173,19 @@ fn handle(c: Cmd) {
                 }
             }
         },
-        Cmd::Record(Some(target)) => STATE.with(|s| s.borrow_mut().rec = Some(Recorder { target, events: vec![], last_move: (i32::MIN, 0) })),
+        Cmd::Record(Some(target)) => {
+            let clicks = uia_rec::click_collector(target);
+            STATE.with(|s| s.borrow_mut().rec = Some(Recorder { target, events: vec![], last_move: (i32::MIN, 0), clicks, downs: 0 }))
+        }
         Cmd::Record(None) => {
             if let Some(r) = STATE.with(|s| s.borrow_mut().rec.take()) {
-                emit(Out::Recorded(clean_recording(r.events)));
+                let events = clean_recording(r.events);
+                // Emitted from this thread's loop once the pending clicks are resolved.
+                r.clicks.finish(move |got| {
+                    let els = uia_rec::rec_elements(&events, got);
+                    FINISHED.lock().unwrap_or_else(|e| e.into_inner()).push((events, els));
+                    wake_thread();
+                });
             }
         }
         Cmd::Pick => STATE.with(|s| s.borrow_mut().picking = true),
@@ -254,6 +274,11 @@ fn on_mouse(msg: u32, m: &MSLLHOOKSTRUCT) -> bool {
             _ => None,
         };
         if let Some(ev) = ev {
+            if let Ev::Button(_, true, cx, cy) = ev {
+                // Only a channel send: the element is resolved on the collector's thread.
+                r.clicks.click(Click { ord: r.downs, sx: x, sy: y, cx, cy });
+                r.downs += 1;
+            }
             r.events.push(Event { t: m.time, ev });
         }
         None
