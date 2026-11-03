@@ -12,7 +12,7 @@ O README diz o que funciona em cada versão do Windows. Se uma dependência não
 
 Leia antes: `../CONVENCOES.md`.
 
-- [ ] Os dois builds Win7 compilam com um comando documentado.
+- [x] Os dois builds Win7 compilam com um comando documentado.
 - [ ] Numa VM com Windows 7 SP1 ou 8.1, o app abre, grava e toca em Segundo plano e em Foco. Se não houver VM, este passo fica com o usuário.
 - [ ] Recursos ausentes mostram uma mensagem e não derrubam o app.
 - [x] O README tem uma tabela de recursos por versão do Windows.
@@ -57,3 +57,11 @@ Feito num container Linux (nightly + `-Z build-std`, alvos `*-win7-windows-gnu` 
 1. **Build** (critério 1). No "Developer PowerShell for VS 2022", na raiz do repo: `rustup toolchain install nightly --component rust-src` e `cargo +nightly build-win7`. Esperado: `target\x86_64-win7-windows-msvc\release\ultratask.exe` e `target\i686-win7-windows-msvc\release\ultratask.exe`. `dumpbin /dependents` em cada um: sem `VCRUNTIME140.dll`, `api-ms-win-crt-*`, `bcryptprimitives.dll` e `api-ms-win-core-synch-l1-2-0.dll`; com `combase.dll` e `api-ms-win-core-winrt-*` (o bloqueio do 7).
 2. **Windows 8.1** (critério 2, critério 3). Numa VM com Windows 8.1 (x64 para o exe x64; x86 ou x64 para o x86): copiar o exe e abrir. Criar um script com o Bloco de Notas como alvo, gravar digitação, tocar em Segundo plano e em Foco. Depois: um bloco "Ler texto (OCR)" deve parar a execução com "OCR indisponível: o OCR do Windows (Windows.Media.Ocr) só existe no Windows 10 e 11…" e o app continua aberto; uma condição de pixel numa janela que fica preta no PrintWindow deve dar o aviso "Windows Graphics Capture indisponível"; `ultratask.exe --render-software` deve mostrar a caixa "não conseguiu abrir a janela (Direct3D 12 / WARP)" e sair sem travar.
 3. **Windows 7 SP1** (critério 2). Numa VM com Windows 7 SP1: abrir o exe Win7. Esperado hoje: o Windows recusa com "combase.dll não encontrada" (ou "ponto de entrada não encontrado"). Se for preciso suportar o 7, o próximo passo é a decisão de projeto acima (delay-load + guardas), num ticket próprio.
+
+### Verificação no Windows (2026-11-03)
+- **Build:** `cargo +nightly build-win7` (nightly com `rust-src`) gerou os dois exes em 11 min: x64 com 15,7 MB e x86 com 13,4 MB.
+- **Smoke test:** os dois rodam o `--validate` neste Windows 11 e dão o resultado certo.
+- **Windows 7:** os dois importam `combase.dll`. Isso confirma que eles não abrem no Windows 7, como o README já diz.
+- **Release:** os dois estão anexados ao release v1.1.0, como `ultratask-win8.1-x64.exe` e `ultratask-win8.1-x86.exe`.
+
+Falta testar numa VM com Windows 8.1: abrir, gravar, tocar e conferir as mensagens dos recursos ausentes.

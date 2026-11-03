@@ -14,10 +14,10 @@ O README explica:
 
 Leia antes: `../CONVENCOES.md`.
 
-- [ ] Os três exes compilam a partir de um único comando.
+- [x] Os três exes compilam a partir de um único comando.
 - [ ] O exe x86 roda num Windows de 64 bits (WoW64): grava, toca em Segundo plano e em Foco, e o OCR funciona.
-- [ ] O exe ARM64 compila. Se houver uma máquina ARM64, ele roda nela; se não houver, o ticket anota que ficou sem verificar.
-- [ ] Os testes passam também no alvo x86 (`cargo test --target i686-pc-windows-msvc`).
+- [x] O exe ARM64 compila. Se houver uma máquina ARM64, ele roda nela; se não houver, o ticket anota que ficou sem verificar.
+- [x] Os testes passam também no alvo x86 (`cargo test --target i686-pc-windows-msvc`).
 
 ## Rastreabilidade
 
@@ -58,3 +58,14 @@ Feito num container Linux (alvos `*-windows-gnu`/`gnullvm` + Wine), ver `../AMBI
 4. **Testes x86** (critério 4): `cargo test --target i686-pc-windows-msvc` e `cargo test --target i686-pc-windows-msvc -- --include-ignored`.
 5. **WoW64** (critério 2): copiar o exe x86 para a Área de Trabalho, abrir, criar um script com o Bloco de Notas como alvo; gravar digitação; tocar em Segundo plano e em Foco (o texto aparece); um bloco "Ler texto (OCR)" numa região com texto lê o texto. Depois copiar o exe x86 para `C:\Program Files (x86)\UltraTask\` e abrir sem elevar: o log deve dizer que a pasta não aceita escrita e usar `%LOCALAPPDATA%\UltraTask`, e nada pode aparecer em `%LOCALAPPDATA%\VirtualStore\Program Files (x86)\UltraTask`.
 6. **ARM64** (critério 3, parte de rodar): sem máquina ARM64 aqui, ficou sem verificar. Numa máquina com Windows 11 ARM: abrir o exe ARM64 e repetir o passo 5 (Gerenciador de Tarefas > Detalhes > coluna Arquitetura deve mostrar ARM64).
+
+### Verificação no Windows (2026-11-03)
+Feita numa máquina Windows 11 x64, com o toolset ARM64 do VS Build Tools instalado e os alvos `i686-pc-windows-msvc` e `aarch64-pc-windows-msvc` do Rust.
+- **Build:** `cargo build-all` gerou os três exes num comando só: x64 com 15,9 MB, x86 com 13,6 MB e ARM64 com 13,6 MB.
+- **Dependências:** nenhum dos três importa `vcruntime`, `msvcp` ou `api-ms-win-crt`.
+- **x86:** `dumpbin` mostra `machine (x86)`, e o manifesto embutido tem `requestedExecutionLevel level='asInvoker'`.
+- **Testes no x86:** `cargo test --target i686-pc-windows-msvc` deu 166 ok. Sob WoW64, os 9 testes ignorados de Windows real também passaram, entre eles o `e2e_background_edit`, que digita em segundo plano e lê de volta por OCR.
+- **ARM64:** `machine (ARM64)`. Ficou sem verificar em hardware, porque não há máquina ARM64 disponível.
+- **Release:** os exes x86 e ARM64 estão anexados ao release v1.1.0, como `ultratask-x86.exe` e `ultratask-arm64.exe`.
+
+Falta, no x86 sob WoW64: gravar e tocar em modo Foco pelo app.

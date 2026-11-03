@@ -8,7 +8,7 @@ Os releases mais recentes, do mais novo para o mais antigo (lista completa em [R
 
 | Release | Data | Tag | Download |
 |---|---|---|---|
-| [UltraTask v1.1.0](https://github.com/William-Colasso/ultra-task/releases/tag/v1.1.0) (mais recente) | 03/11/2026 | `v1.1.0` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask.exe) (x64, 15,9 MB) |
+| [UltraTask v1.1.0](https://github.com/William-Colasso/ultra-task/releases/tag/v1.1.0) (mais recente) | 03/11/2026 | `v1.1.0` | [x64](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask.exe) (15,9 MB) · [x86](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask-x86.exe) (13,6 MB) · [ARM64](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask-arm64.exe) (13,6 MB) · [Win 8.1 x64](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask-win8.1-x64.exe) (15,7 MB) · [Win 8.1 x86](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask-win8.1-x86.exe) (13,4 MB) |
 | [UltraTask v1.0.0](https://github.com/William-Colasso/ultra-task/releases/tag/latest) | 02/11/2026 | `latest` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/latest/ultratask.exe) (x64, 8,2 MB) |
 
 A v1.1.0 traz a rodada 3:
@@ -18,7 +18,11 @@ A v1.1.0 traz a rodada 3:
 - UI Automation;
 - modo CDP.
 
-Os builds de 32 bits, ARM64 e Windows 8.1 não vão anexados: para gerar, veja [Build](#build).
+Qual baixar:
+- **x64:** a opção da maioria (Windows 10/11 de 64 bits).
+- **x86:** Windows de 32 bits; roda também no de 64 bits.
+- **ARM64:** PCs com Windows em ARM. Foi só compilado, não testado em hardware ARM.
+- **Win 8.1:** melhor esforço, e não abre no Windows 7 (ver a tabela em [Requisitos](#requisitos)).
 
 ## Requisitos
 - Windows 10 ou 11: x64, x86 (32 bits, roda também num Windows de 64 bits) ou ARM64, cada um com o seu exe (ver [Build](#build)). Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
