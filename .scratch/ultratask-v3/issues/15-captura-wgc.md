@@ -15,7 +15,7 @@ Detalhes na pesquisa: `../pesquisa-input-paralelo.md`, R3b.
 Leia antes: `../CONVENCOES.md`.
 
 - [ ] Com uma janela do Chrome e um jogo (ou amostra) DirectX em janela, ambos cobertos por outra janela, uma condição de pixel e um OCR leem o valor certo em Segundo plano.
-- [ ] A imagem capturada com a janela coberta é praticamente igual à capturada com ela visível. O teste fica ignorado por padrão, porque mexe em janelas reais.
+- [x] A imagem capturada com a janela coberta é praticamente igual à capturada com ela visível. O teste fica ignorado por padrão, porque mexe em janelas reais.
 - [x] Apps comuns continuam no PrintWindow, sem custo extra.
 - [x] Se houver dependência nova, ela compila nos alvos dos tickets 07 e 08 sem toolchain C além do MSVC. Onde o WGC não existir, fica o PrintWindow.
 - [x] O README atualiza a limitação "jogos DirectX aparecem pretos".
@@ -82,3 +82,11 @@ Preparação: num worktree com este branch, `cargo build` e `cargo test` (toolch
 4. **Minimizada:** minimize o alvo e rode. O log mostra "janela-alvo minimizada: não dá para capturar", e a condição dá falso.
 5. **Windows 7/8 (ticket 08, melhor esforço):** no build Win7, rode o passo 2 contra o Bloco de Notas. O exe tem que abrir e, se a captura vier de uma cor só, o log avisa "Windows Graphics Capture indisponível" e segue com PrintWindow.
 6. Ao fim, marque os critérios e mude o **Status** para `done`.
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+`e2e_wgc_covered_matches_visible` passou. Falta o roteiro com o Chrome e um jogo DirectX cobertos.

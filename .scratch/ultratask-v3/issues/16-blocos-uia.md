@@ -101,3 +101,11 @@ Pré-requisito: `cargo build --release` (MSVC) e `cargo test -- --include-ignore
    5. Esperado: o log mostra `teste 2` nos três; o que você digita continua indo só para a janela da frente; a posição do cursor e a janela ativa no PowerShell não mudam por causa dos scripts.
 3. **Elemento não encontrado:** troque o AutomationId/nome de um bloco por algo inexistente, timeout `1000`. Sem a opção, o log mostra `erro: elemento … não encontrado em 1000 ms`. Com **se não achar, clicar no ponto**, aparece `aviso: elemento … não encontrado; clicando no ponto capturado (x, y)` e o clique acontece nesse ponto. (A lógica já está coberta por `waits_for_the_element_then_errors_or_falls_back`; falta ver com a UIA real.)
 4. **Aparência:** confira o editor do bloco e da condição (popup da identificação, combo de ações e de testes) nos temas claro e escuro.
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+`real_uia_on_own_window` passou com a UI Automation de verdade. Falta o roteiro com os três apps cobertos.

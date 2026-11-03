@@ -66,3 +66,11 @@ Depois dos tickets 10 a 13, o branch recebeu `git merge main-vqbyri` (tickets 05
 - *Pasta de dados (ticket 06)*: `model::base_dir()` agora é `compat::data_dir()`, ou seja, a pasta do exe ou `%LOCALAPPDATA%\UltraTask` quando a do exe não aceita escrita. Decisão: os caminhos relativos dos destinos Arquivo e SQLite e a pasta de trabalho do Comando **acompanham** essa pasta, porque é onde dá para gravar e onde ficam `scripts\` e `ultratask.json`. Não houve mudança de código, porque os destinos já usavam `base_dir()`. A skill, o README, a dica da aba e os comentários agora dizem "pasta de dados".
 - *Exe exportado (ticket 05)*: os destinos novos guardam tudo no próprio `Script` (`integrations[].dest`), que já viaja no `Payload` pelo serde. Não precisam de nada fora do `Script`. No exe exportado, um caminho relativo parte da pasta de dados *do exe exportado* (a pasta dele, ou `%LOCALAPPDATA%\UltraTask`), que é o comportamento esperado para um exe portátil. O SQLite vai embutido também no exe exportado, que é o mesmo binário. O ODBC usa o `odbc32.dll` do sistema, e a string de conexão viaja no `Script`, com a senha em texto puro se houver.
 - Verificação depois do merge: `cargo test --target x86_64-pc-windows-gnu` passou 2 vezes, com 166 testes passando, 11 ignorados e nenhum warning. Rodou num `WINEPREFIX` próprio, porque o `~/.wine` compartilhado estava sem `drive_c` e todo exe falhava com `could not load kernel32.dll`. O `real_database_round_trip` passou de novo com o driver SQLite3 ODBC. Os 10 snippets completos da skill passaram em `wine ultratask.exe --validate` (`LC_ALL=C.UTF-8`, nome do arquivo igual ao `name`).
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+`read_only_file_is_permission_error` passou no Windows, e o build de release com MSVC também. Falta conferir a aparência da aba.

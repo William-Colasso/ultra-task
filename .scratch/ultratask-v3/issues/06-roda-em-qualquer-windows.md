@@ -14,7 +14,7 @@ O event loop do winit não pode ser recriado no mesmo processo. Por isso, se abr
 
 Leia antes: `../CONVENCOES.md`.
 
-- [ ] O exe só importa DLLs do sistema (confira com `dumpbin /dependents` ou equivalente).
+- [x] O exe só importa DLLs do sistema (confira com `dumpbin /dependents` ou equivalente).
 - [ ] O app abre, grava e toca um script no Windows Sandbox com a vGPU desligada, ou numa VM sem 3D. Se não houver como testar, peça esse teste ao usuário.
 - [ ] Sem OCR disponível, aparece a mensagem e o app não entra em pânico.
 - [ ] Numa pasta sem escrita, o app avisa e usa o local alternativo. Numa pasta normal, o comportamento é igual ao de hoje.
@@ -68,3 +68,11 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu` + Wine), ver `../AMBIENT
 2. **Sem GPU.** Ativar o Windows Sandbox (Recursos do Windows) e criar `semgpu.wsb` com `<Configuration><VGpu>Disable</VGpu><MappedFolders><MappedFolder><HostFolder>C:\caminho\target\release</HostFolder><ReadOnly>true</ReadOnly></MappedFolder></MappedFolders></Configuration>`. Abrir o `.wsb`, copiar `ultratask.exe` da pasta mapeada para a Área de Trabalho do Sandbox e dar duplo clique. Esperado: a janela abre (o log mostra "OpenGL indisponível: a janela usa Direct3D 12 por software (Microsoft Basic Render Driver)"); criar um script com o Bloco de Notas como alvo, gravar digitação, tocar em Segundo plano e ver o texto aparecer. Se não houver Sandbox, uma VM do Hyper-V/VirtualBox sem aceleração 3D serve. Também rodar o exe direto da pasta mapeada (somente leitura) para cobrir o passo 4 no mesmo Sandbox.
 3. **Sem OCR.** No Sandbox (ou numa VM) em inglês sem idioma de OCR extra, ou removendo o OCR com `Get-WindowsCapability -Online -Name "Language.OCR*" | Remove-WindowsCapability -Online` (PowerShell admin; reinstale depois com `Add-WindowsCapability -Online -Name "Language.OCR~~~pt-BR~0.0.1.0"`): criar um script com um bloco "Ler texto (OCR)" e um "Esperar até" com condição de OCR, tocar. Esperado: o log mostra "OCR indisponível: … Add-WindowsCapability …", o bloco de OCR termina a execução com erro, a condição só avisa e conta como falsa, e o app continua aberto. Rodar também `cargo test -- --include-ignored` numa máquina com OCR instalado para o `e2e_background_edit`.
 4. **Pasta sem escrita.** Copiar o exe para `C:\Program Files\UltraTask\` (precisa de admin para copiar) e abrir **sem** elevar. Esperado: o log mostra "A pasta do UltraTask (C:\Program Files\UltraTask) não aceita escrita: scripts e ajustes ficam em C:\Users\<você>\AppData\Local\UltraTask"; criar um script e mudar um ajuste; conferir que `%LOCALAPPDATA%\UltraTask\scripts\*.json` e `%LOCALAPPDATA%\UltraTask\ultratask.json` foram criados e que nada apareceu em Program Files. Depois, numa pasta normal (ex.: Área de Trabalho), conferir que `scripts\` e `ultratask.json` continuam ao lado do exe e que não há aviso.
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+`dumpbin /dependents` do exe de release: só DLLs do Windows (kernel32, user32, gdi32, opengl32, d3d11, dxgi, ODBC32, winhttp, combase…), sem `vcruntime140.dll` nem `api-ms-win-crt-*`. Faltam o teste sem GPU, o Windows sem OCR e a pasta sem escrita.

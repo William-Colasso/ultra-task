@@ -17,9 +17,9 @@ Cuidados levantados pela pesquisa (`../pesquisa-input-paralelo.md`, R3a):
 Leia antes: `../CONVENCOES.md`.
 
 - [ ] Ctrl+S, enviado em Segundo plano para o Bloco de Notas (ou um app WinForms) coberto por outra janela, abre o diálogo Salvar em 20 de 20 tentativas.
-- [ ] Durante o teste, o Ctrl real nunca aparece pressionado para o resto do sistema (GetAsyncKeyState), e a janela ativa do usuário não muda.
-- [ ] Uma janela-alvo travada não congela a execução: a combinação falha com um aviso no log.
-- [ ] Teclas sem modificador seguem o caminho de hoje, e o teste E2E existente continua verde.
+- [x] Durante o teste, o Ctrl real nunca aparece pressionado para o resto do sistema (GetAsyncKeyState), e a janela ativa do usuário não muda.
+- [x] Uma janela-alvo travada não congela a execução: a combinação falha com um aviso no log.
+- [x] Teclas sem modificador seguem o caminho de hoje, e o teste E2E existente continua verde.
 - [x] O README tira esse item das limitações conhecidas, ou explica o que ainda não funciona.
 
 ## Rastreabilidade
@@ -81,3 +81,11 @@ Preparação: num worktree com este branch, `cargo build` e `cargo test` (toolch
 3. **Ctrl real e janela ativa:** durante o passo 2, deixe outro app em foco (por exemplo, o Bloco de Notas de um segundo arquivo) e digite nele: nada sai em maiúscula/atalho, e o foco não muda. Com o PowerShell, rode em paralelo um loop que lê `GetAsyncKeyState(0x11)` a cada 5 ms (via `Add-Type` com `[DllImport("user32.dll")]`) e anote se o bit 0x8000 aparece; não pode aparecer. O teste `e2e_ctrl_s_forged` já confere as duas coisas na janela própria.
 4. **Alvo travado:** além do teste do passo 1, rode o script do passo 2 contra uma janela travada de propósito (por exemplo, um app WinForms com um botão que faz `Thread.Sleep(10000)` na thread da UI; clique nele antes). A execução não pode congelar, e o log tem que mostrar "aviso: a janela-alvo não responde; Ctrl+S não foi enviado".
 5. Ao fim, marque os critérios e mude o **Status** para `done`.
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+`e2e_ctrl_s_forged` passou: 20 Ctrl+S falsificados numa janela de teste coberta, com `GetAsyncKeyState(VK_CONTROL)` sempre solto e a janela ativa sem mudar. `e2e_hung_target_does_not_freeze` e o `win::tests::e2e_background_edit` antigo também passaram. Falta o roteiro manual do Ctrl+S 20/20 no Bloco de Notas.

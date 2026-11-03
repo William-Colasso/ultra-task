@@ -55,3 +55,11 @@ Feito num container Linux (alvo `x86_64-pc-windows-gnu`, testes no Wine; veja `.
 Todos os critérios foram verificados aqui; falta só o que o container não prova:
 - `cargo build --release` com o toolchain MSVC.
 - Olhar a tela (`cargo run --release`): a paleta aparece à esquerda da árvore, com os cinco grupos (Ação, Espera, Controle, Variáveis, Depuração) nas cores dos cartões, nos temas claro e escuro (botão ☀/🌙); arrastar "Esperar" da paleta para o corpo vazio de um Repetir mostra a linha indicadora e o bloco cai ali; botão direito num cartão → "Envolver em Enquanto" põe o bloco no corpo do Enquanto no mesmo lugar; ⏷ recolhe um Repetir e mostra "(N blocos dentro)", e o 💾 Salvar não acende só por recolher.
+
+### Verificação no Windows (2026-11-03)
+Em 2026-11-03, numa máquina Windows 11 com o toolchain `stable-x86_64-pc-windows-msvc` (branch `main-vqbyri` @ 1903fe5):
+- `cargo test`: 166 ok, 0 falhas, 11 ignorados;
+- `cargo build --release`: ok (SQLite `bundled` compilado com `cl.exe`); exe de 15,9 MB que só importa DLLs do sistema;
+- `cargo test -- --ignored --skip cdp_real_browser --skip real_database_round_trip`: 9 ok, 0 falhas.
+
+O build de release com MSVC passou. Falta conferir a aparência na tela.
