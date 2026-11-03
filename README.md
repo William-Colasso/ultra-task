@@ -8,9 +8,17 @@ Os releases mais recentes, do mais novo para o mais antigo (lista completa em [R
 
 | Release | Data | Tag | Download |
 |---|---|---|---|
-| [UltraTask v1.0.0](https://github.com/William-Colasso/ultra-task/releases/tag/latest) (mais recente) | 02/11/2026 | `latest` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/latest/ultratask.exe) (x64, 8,2 MB) |
+| [UltraTask v1.1.0](https://github.com/William-Colasso/ultra-task/releases/tag/v1.1.0) (mais recente) | 03/11/2026 | `v1.1.0` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/v1.1.0/ultratask.exe) (x64, 15,9 MB) |
+| [UltraTask v1.0.0](https://github.com/William-Colasso/ultra-task/releases/tag/latest) | 02/11/2026 | `latest` | [ultratask.exe](https://github.com/William-Colasso/ultra-task/releases/download/latest/ultratask.exe) (x64, 8,2 MB) |
 
-A v1.0.0 é anterior à rodada 3: editor com arrastar e soltar, integrações, exportar .exe, UI Automation, modo CDP e builds extras ainda não estão em nenhum release. Até sair um release novo, compile a partir do código (ver [Build](#build)).
+A v1.1.0 traz a rodada 3:
+- editor com arrastar e soltar;
+- integrações;
+- exportar .exe;
+- UI Automation;
+- modo CDP.
+
+Os builds de 32 bits, ARM64 e Windows 8.1 não vão anexados: para gerar, veja [Build](#build).
 
 ## Requisitos
 - Windows 10 ou 11: x64, x86 (32 bits, roda também num Windows de 64 bits) ou ARM64, cada um com o seu exe (ver [Build](#build)). Não há nada para instalar: basta copiar o `ultratask.exe` sozinho para qualquer pasta.
